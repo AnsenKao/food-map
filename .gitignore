@@ -7,9 +7,34 @@ wheels/
 *.egg-info
 
 # Virtual environments
-.venv
+.venv/
+.env
 
+# macOS
 .DS_Store
 
-# db
-food_map.db
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Data directory
+data/
+!data/.gitkeep
+
+# Instagram session files
+session-*
+
+# Temporary files
+*.tmp
+*.temp
