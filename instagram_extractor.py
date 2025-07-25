@@ -54,16 +54,17 @@ def init_database():
     conn.commit()
     conn.close()
 
-def is_post_processed(shortcode):
-    """檢查貼文是否已經處理過"""
+def get_all_processed_ids():
+    """一次性載入所有已處理的貼文 ID，回傳 set 用於快速查找"""
     conn = sqlite3.connect(DATABASE_FILE)
     cursor = conn.cursor()
-    cursor.execute('SELECT 1 FROM posts WHERE post_id = ? LIMIT 1', (shortcode,))
-    result = cursor.fetchone()
+    cursor.execute('SELECT post_id FROM posts')
+    processed_ids = {row[0] for row in cursor.fetchall()}
     conn.close()
-    return result is not None
+    print(f"[INFO] 載入了 {len(processed_ids)} 個已處理貼文 ID 到記憶體")
+    return processed_ids
 
-def save_post_to_db(post):
+def save_post_to_db(post, processed_set):
     """將貼文資料儲存到資料庫"""
     conn = sqlite3.connect(DATABASE_FILE)
     cursor = conn.cursor()
@@ -85,6 +86,8 @@ def save_post_to_db(post):
         ))
         
         conn.commit()
+        # 成功插入後，將 ID 加入到記憶體中的 set
+        processed_set.add(post.shortcode)
         return True
         
     except sqlite3.IntegrityError:
@@ -226,6 +229,9 @@ def main():
         existing_count = get_processed_count()
         print(f"[INFO] 資料庫現有貼文: {existing_count} 篇")
         
+        # 載入所有已處理的貼文 ID 到記憶體 (一次性查詢，大幅提升效能)
+        processed_set = get_all_processed_ids()
+        
         # 提取儲存貼文並直接存入資料庫
         print("\n[INFO] 開始處理儲存貼文...")
         
@@ -238,20 +244,26 @@ def main():
             print("[INFO] 正在獲取儲存貼文清單...")
             saved_posts = profile.get_saved_posts()
             
-            print("[INFO] 開始串流處理貼文...")
+            # 先收集所有儲存貼文的 shortcode 到 set
+            print("[INFO] 正在分析儲存貼文...")
+            saved_posts_list = list(saved_posts)  # 轉換為 list 以便重複使用
+            saved_shortcodes = {post.shortcode for post in saved_posts_list}
+            total_found = len(saved_shortcodes)
             
-            # 直接處理，不轉換為 list（節省記憶體）
-            for post in saved_posts:
-                total_found += 1
-                
-                # 超快速資料庫查詢檢查重複
-                if is_post_processed(post.shortcode):
-                    skipped_count += 1
-                    if skipped_count <= 3:  # 只顯示前3個跳過的
-                        print(f"[SKIP] 已處理: {post.shortcode} (@{post.owner_username})")
-                    elif skipped_count == 4:
-                        print("[SKIP] ... (省略顯示更多已處理貼文)")
-                    continue
+            # 使用 set 差集直接找出需要處理的貼文
+            new_shortcodes = saved_shortcodes - processed_set
+            skipped_count = total_found - len(new_shortcodes)
+            
+            print(f"[INFO] 找到 {total_found} 篇儲存貼文，其中 {len(new_shortcodes)} 篇為新貼文")
+            if skipped_count > 0:
+                print(f"[INFO] 跳過 {skipped_count} 篇已處理貼文")
+            
+            print("[INFO] 開始處理新貼文...")
+            
+            # 只處理新的貼文
+            for post in saved_posts_list:
+                if post.shortcode not in new_shortcodes:
+                    continue  # 跳過已處理的貼文
                 
                 if MAX_POSTS and count >= MAX_POSTS:
                     print(f"[INFO] 已達到最大處理數量 {MAX_POSTS}，停止處理")
@@ -265,19 +277,19 @@ def main():
                     print(f"       類型: {'影片' if post.is_video else '圖片'}")
                     print(f"       互動: {post.likes:,} 讚, {post.comments:,} 留言")
                     
-                    # 直接儲存到資料庫
-                    if save_post_to_db(post):
+                    # 直接儲存到資料庫，並更新記憶體中的 processed_set
+                    if save_post_to_db(post, processed_set):
                         count += 1
-                        print(f"       ✅ 已儲存到資料庫")
+                        print("       ✅ 已儲存到資料庫")
                         
                         # 顯示文字內容預覽
                         if post.caption:
                             preview = post.caption[:100] + "..." if len(post.caption) > 100 else post.caption
                             print(f"       內容預覽: {preview}")
                         else:
-                            print(f"       內容預覽: （無文字內容）")
+                            print("       內容預覽: （無文字內容）")
                     else:
-                        print(f"       ⚠️ 跳過（可能重複）")
+                        print("       ⚠️ 跳過（可能重複）")
                     
                 except KeyboardInterrupt:
                     print("\n[INFO] 使用者中斷處理")
@@ -298,7 +310,7 @@ def main():
         new_count = final_count - existing_count
         
         if new_count > 0:
-            print(f"\n[SUCCESS] 處理完成！")
+            print("\n[SUCCESS] 處理完成！")
             print(f"[INFO] 新增 {new_count} 篇貼文到資料庫")
             print(f"[INFO] 資料庫總計: {final_count} 篇貼文")
             if skipped_count > 0:
