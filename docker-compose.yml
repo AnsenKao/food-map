@@ -1,0 +1,57 @@
+services:
+  instagram-api:
+    build: .
+    container_name: instagram-food-map-api
+    ports:
+      - "8080:8080"
+    volumes:
+      # 持久化資料庫檔案
+      - ./data:/app/data
+      # 持久化 session 檔案
+      - instagram_sessions:/home/appuser/.local/share/instaloader/
+    environment:
+      - PYTHONPATH=/app
+      - API_HOST=0.0.0.0
+      - API_PORT=8080
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8080/')"]
+      interval: 60s  # 改成 60 秒檢查一次
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: n8n-automation
+    ports:
+      - "5678:5678"
+    volumes:
+      # 持久化 n8n 資料
+      - n8n_data:/home/node/.n8n
+      # 允許存取本地檔案（可選）
+      - ./n8n-data:/data
+    environment:
+      - N8N_HOST=0.0.0.0
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - NODE_ENV=production
+      # 設定時區
+      - GENERIC_TIMEZONE=Asia/Taipei
+      # 設定 webhook URL（如果需要）
+      - WEBHOOK_URL=http://localhost:5678
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:5678/healthz || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      - instagram-api
+
+volumes:
+  instagram_sessions:
+    driver: local
+  n8n_data:
+    driver: local
