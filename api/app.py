@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 import logging
 from contextlib import asynccontextmanager
+import instaloader
 
 # 添加專案根目錄到 Python 路徑
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -31,6 +32,9 @@ class LoginRequest(BaseModel):
     username: str
     password: Optional[str] = None
     use_saved_session: bool = True
+
+class TwoFactorRequest(BaseModel):
+    two_factor_code: str
 
 class SearchRequest(BaseModel):
     keyword: str
@@ -81,6 +85,7 @@ async def root():
         "version": "1.0.0",
         "endpoints": {
             "login": "POST /login",
+            "verify_2fa": "POST /verify-2fa/{username}",
             "profile": "GET /profile/{username}",
             "extract": "POST /extract/{username}",
             "posts": "GET /posts/{username}",
@@ -89,19 +94,51 @@ async def root():
         }
     }
 
+@app.post("/verify-2fa/{username}")
+async def verify_2fa(username: str, request: TwoFactorRequest):
+    """驗證 2FA 驗證碼"""
+    try:
+        extractor = get_extractor(username)
+
+        # 檢查是否需要 2FA 驗證（此時用戶應該已嘗試過登入）
+        if extractor.auth_manager.is_logged_in:
+            return {
+                "success": True,
+                "message": "用戶已登入，無需 2FA 驗證",
+                "username": username
+            }
+
+        # 直接使用 2FA 驗證碼進行登入
+        success = extractor.auth_manager.verify_2fa(request.two_factor_code)
+
+        if success:
+            return {
+                "success": True,
+                "message": "2FA 驗證成功",
+                "username": username
+            }
+        else:
+            raise HTTPException(status_code=401, detail="2FA 驗證失敗")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"2FA 驗證時發生錯誤: {e}")
+        raise HTTPException(status_code=500, detail=f"2FA 驗證時發生錯誤: {str(e)}")
+
 @app.post("/login")
 async def login(request: LoginRequest):
     """登入 Instagram"""
     try:
         extractor = get_extractor(request.username)
-        
+
         # 初始化資料庫
         if not extractor.init_database():
             raise HTTPException(status_code=500, detail="資料庫初始化失敗")
-        
+
         # 登入
         success = extractor.login(request.password)
-        
+
         if success:
             return {
                 "success": True,
@@ -110,7 +147,15 @@ async def login(request: LoginRequest):
             }
         else:
             raise HTTPException(status_code=401, detail="登入失敗")
-            
+
+    except instaloader.exceptions.TwoFactorAuthRequiredException:
+        return {
+            "success": False,
+            "needs_2fa": True,
+            "message": "需要 2FA 驗證碼，請使用 POST /verify-2fa/{username} API 提交驗證碼",
+            "username": request.username,
+            "next_step": f"POST /verify-2fa/{request.username}"
+        }
     except Exception as e:
         logger.error(f"登入時發生錯誤: {e}")
         raise HTTPException(status_code=500, detail=f"登入時發生錯誤: {str(e)}")

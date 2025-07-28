@@ -28,6 +28,7 @@ class InstagramAuth:
         self.loader = instaloader.Instaloader()
         self._configure_loader()
         self._is_logged_in = False
+        self._needs_2fa = False  # 追蹤是否需要 2FA 驗證
     
     def _setup_default_logger(self) -> logging.Logger:
         """設定預設日誌記錄器"""
@@ -53,6 +54,11 @@ class InstagramAuth:
     def is_logged_in(self) -> bool:
         """檢查是否已登入"""
         return self._is_logged_in
+    
+    @property
+    def needs_2fa(self) -> bool:
+        """檢查是否需要 2FA 驗證"""
+        return self._needs_2fa
     
     def login(self, password: Optional[str] = None) -> bool:
         """支援 2FA 的登入函式"""
@@ -98,7 +104,10 @@ class InstagramAuth:
             return True
             
         except instaloader.exceptions.TwoFactorAuthRequiredException:
-            return self._handle_2fa()
+            self.logger.info("需要雙重驗證 (2FA)")
+            self._needs_2fa = True
+            # 不在這裡處理 2FA，讓 API 來處理
+            raise  # 重新拋出異常給 API 處理
         
         except instaloader.exceptions.BadCredentialsException:
             self.logger.error("用戶名或密碼錯誤")
@@ -117,9 +126,11 @@ class InstagramAuth:
         """處理雙重驗證"""
         self.logger.info("需要雙重驗證 (2FA)")
         
-        # 獲取 2FA 驗證碼
-        two_factor_code = input("請輸入 2FA 驗證碼: ")
-        
+        # 在 Docker 環境中，input() 不可用，拋出異常讓 API 處理
+        raise instaloader.exceptions.TwoFactorAuthRequiredException("需要 2FA 驗證碼")
+    
+    def verify_2fa(self, two_factor_code: str) -> bool:
+        """使用提供的 2FA 驗證碼進行驗證"""
         try:
             # 使用 2FA 登入
             self.logger.info("正在驗證 2FA 碼...")
@@ -141,10 +152,15 @@ class InstagramAuth:
         except Exception as e:
             self.logger.error(f"2FA 驗證失敗: {e}")
             return False
+            
+        except Exception as e:
+            self.logger.error(f"2FA 驗證失敗: {e}")
+            return False
     
     def logout(self):
         """登出"""
         self._is_logged_in = False
+        self._needs_2fa = False
         self.logger.info("已登出")
     
     def close(self):
