@@ -188,6 +188,10 @@ class InstagramExtractor:
         """取得已處理的貼文數量"""
         return self.db_manager.get_posts_count()
     
+    def update_post_metadata(self, post_id: str, parsed_store: Optional[str] = None, parsed_address: Optional[str] = None) -> bool:
+        """更新貼文的解析店家和地址資訊"""
+        return self.db_manager.update_post_metadata(post_id, parsed_store, parsed_address)
+    
     def close(self):
         """清理資源"""
         self.auth_manager.close()

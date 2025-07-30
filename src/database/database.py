@@ -228,6 +228,51 @@ class DatabaseManager:
             self.logger.error(f"搜尋貼文失敗: {e}")
             return []
     
+    def update_post_metadata(self, post_id: str, parsed_store: Optional[str] = None, parsed_address: Optional[str] = None) -> bool:
+        """更新貼文的 parsed_store 和 parsed_address 欄位"""
+        try:
+            conn = sqlite3.connect(self.database_file)
+            cursor = conn.cursor()
+            
+            # 構建動態 SQL 更新語句
+            update_fields = []
+            params = []
+            
+            if parsed_store is not None:
+                update_fields.append("parsed_store = ?")
+                params.append(parsed_store)
+            
+            if parsed_address is not None:
+                update_fields.append("parsed_address = ?")
+                params.append(parsed_address)
+            
+            if not update_fields:
+                self.logger.warning("沒有提供要更新的欄位")
+                return False
+            
+            # 始終更新 updated_at 欄位
+            update_fields.append("updated_at = CURRENT_TIMESTAMP")
+            params.append(post_id)
+            
+            sql = f"UPDATE posts SET {', '.join(update_fields)} WHERE post_id = ?"
+            
+            cursor.execute(sql, params)
+            rows_affected = cursor.rowcount
+            
+            conn.commit()
+            conn.close()
+            
+            if rows_affected > 0:
+                self.logger.info(f"成功更新貼文 {post_id} 的元數據")
+                return True
+            else:
+                self.logger.warning(f"找不到貼文 ID: {post_id}")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"更新貼文元數據失敗: {e}")
+            return False
+    
     def clear_cache(self):
         """清除快取"""
         self._processed_ids_cache = None

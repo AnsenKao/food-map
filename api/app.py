@@ -40,6 +40,11 @@ class SearchRequest(BaseModel):
     keyword: str
     limit: Optional[int] = 100
 
+class UpdatePostRequest(BaseModel):
+    post_id: str
+    parsed_store: Optional[str] = None
+    parsed_address: Optional[str] = None
+
 # 應用程式生命週期管理
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -301,6 +306,35 @@ async def logout(username: str):
     except Exception as e:
         logger.error(f"登出時發生錯誤: {e}")
         raise HTTPException(status_code=500, detail=f"登出時發生錯誤: {str(e)}")
+
+@app.patch("/posts/update-metadata/{username}")
+async def update_post_metadata(username: str, request: UpdatePostRequest):
+    """更新貼文的店家和地址解析資訊"""
+    try:
+        extractor = get_extractor(username)
+        
+        success = extractor.update_post_metadata(
+            post_id=request.post_id,
+            parsed_store=request.parsed_store,
+            parsed_address=request.parsed_address
+        )
+        
+        if success:
+            return {
+                "success": True,
+                "message": f"成功更新貼文 {request.post_id} 的元數據",
+                "post_id": request.post_id,
+                "parsed_store": request.parsed_store,
+                "parsed_address": request.parsed_address
+            }
+        else:
+            raise HTTPException(status_code=404, detail=f"找不到貼文 ID: {request.post_id}")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"更新貼文元數據時發生錯誤: {e}")
+        raise HTTPException(status_code=500, detail=f"更新貼文元數據時發生錯誤: {str(e)}")
 
 # 錯誤處理
 @app.exception_handler(Exception)
