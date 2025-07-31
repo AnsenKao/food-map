@@ -273,6 +273,146 @@ class DatabaseManager:
             self.logger.error(f"更新貼文元數據失敗: {e}")
             return False
     
+    def get_unparsed_posts(self, limit: Optional[int] = None, offset: int = 0) -> List[dict]:
+        """獲取尚未解析店家和地址的貼文，只返回 post_id 和 content"""
+        try:
+            conn = sqlite3.connect(self.database_file)
+            cursor = conn.cursor()
+            
+            # 查詢 parsed_store 和 parsed_address 都為 NULL 的貼文
+            base_query = """
+                SELECT post_id, content 
+                FROM posts 
+                WHERE (parsed_store IS NULL OR parsed_store = '') 
+                  AND (parsed_address IS NULL OR parsed_address = '')
+                ORDER BY post_date DESC
+            """
+            
+            if limit is not None:
+                query = f"{base_query} LIMIT ? OFFSET ?"
+                cursor.execute(query, (limit, offset))
+            else:
+                query = f"{base_query} OFFSET ?"
+                cursor.execute(query, (offset,))
+            
+            rows = cursor.fetchall()
+            conn.close()
+            
+            # 返回字典格式的結果
+            results = []
+            for row in rows:
+                results.append({
+                    'post_id': row[0],
+                    'content': row[1]
+                })
+            
+            return results
+            
+        except Exception as e:
+            self.logger.error(f"獲取未解析貼文失敗: {e}")
+            return []
+    
+    def batch_update_post_metadata(self, updates: List[dict]) -> dict:
+        """批次更新多個貼文的 parsed_store 和 parsed_address 欄位
+        
+        Args:
+            updates: 包含更新資料的字典列表，每個字典包含 post_id, parsed_store, parsed_address
+            
+        Returns:
+            包含成功、失敗數量和詳細結果的字典
+        """
+        results = {
+            "success_count": 0,
+            "failed_count": 0,
+            "success_posts": [],
+            "failed_posts": []
+        }
+        
+        try:
+            conn = sqlite3.connect(self.database_file)
+            cursor = conn.cursor()
+            
+            for update in updates:
+                post_id = update.get("post_id")
+                parsed_store = update.get("parsed_store")
+                parsed_address = update.get("parsed_address")
+                
+                if not post_id:
+                    results["failed_count"] += 1
+                    results["failed_posts"].append({
+                        "post_id": post_id,
+                        "error": "缺少 post_id"
+                    })
+                    continue
+                
+                # 構建動態 SQL 更新語句
+                update_fields = []
+                params = []
+                
+                if parsed_store is not None:
+                    update_fields.append("parsed_store = ?")
+                    params.append(parsed_store)
+                
+                if parsed_address is not None:
+                    update_fields.append("parsed_address = ?")
+                    params.append(parsed_address)
+                
+                if not update_fields:
+                    results["failed_count"] += 1
+                    results["failed_posts"].append({
+                        "post_id": post_id,
+                        "error": "沒有提供要更新的欄位"
+                    })
+                    continue
+                
+                # 始終更新 updated_at 欄位
+                update_fields.append("updated_at = CURRENT_TIMESTAMP")
+                params.append(post_id)
+                
+                sql = f"UPDATE posts SET {', '.join(update_fields)} WHERE post_id = ?"
+                
+                try:
+                    cursor.execute(sql, params)
+                    rows_affected = cursor.rowcount
+                    
+                    if rows_affected > 0:
+                        results["success_count"] += 1
+                        results["success_posts"].append({
+                            "post_id": post_id,
+                            "parsed_store": parsed_store,
+                            "parsed_address": parsed_address
+                        })
+                        self.logger.info(f"成功更新貼文 {post_id}")
+                    else:
+                        results["failed_count"] += 1
+                        results["failed_posts"].append({
+                            "post_id": post_id,
+                            "error": "找不到該貼文 ID"
+                        })
+                        
+                except Exception as e:
+                    results["failed_count"] += 1
+                    results["failed_posts"].append({
+                        "post_id": post_id,
+                        "error": str(e)
+                    })
+                    self.logger.error(f"更新貼文 {post_id} 失敗: {e}")
+            
+            conn.commit()
+            conn.close()
+            
+            self.logger.info(f"批次更新完成: 成功 {results['success_count']} 篇，失敗 {results['failed_count']} 篇")
+            return results
+                
+        except Exception as e:
+            self.logger.error(f"批次更新貼文元數據失敗: {e}")
+            return {
+                "success_count": 0,
+                "failed_count": len(updates),
+                "success_posts": [],
+                "failed_posts": [{"post_id": "批次操作", "error": str(e)}]
+            }
+    
     def clear_cache(self):
         """清除快取"""
         self._processed_ids_cache = None

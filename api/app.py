@@ -45,6 +45,9 @@ class UpdatePostRequest(BaseModel):
     parsed_store: Optional[str] = None
     parsed_address: Optional[str] = None
 
+class BatchUpdatePostRequest(BaseModel):
+    updates: List[UpdatePostRequest]
+
 # 應用程式生命週期管理
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -95,7 +98,9 @@ async def root():
             "extract": "POST /extract/{username}",
             "posts": "GET /posts/{username}",
             "search": "POST /search/{username}",
-            "status": "GET /status/{username}"
+            "status": "GET /status/{username}",
+            "update_metadata": "PATCH /posts/update-metadata/{username} (批次更新)",
+            "unparsed_posts": "GET /posts/unparsed/{username}"
         }
     }
 
@@ -244,7 +249,7 @@ async def extract_posts_sync(username: str) -> ExtractResult:
         raise HTTPException(status_code=500, detail=f"提取時發生錯誤: {str(e)}")
 
 @app.get("/posts/{username}")
-async def get_posts(username: str, limit: Optional[int] = 50, offset: int = 0) -> List[PostData]:
+async def get_posts(username: str, limit: Optional[int] = 100, offset: int = 0) -> List[PostData]:
     """獲取貼文列表"""
     try:
         extractor = get_extractor(username)
@@ -308,33 +313,65 @@ async def logout(username: str):
         raise HTTPException(status_code=500, detail=f"登出時發生錯誤: {str(e)}")
 
 @app.patch("/posts/update-metadata/{username}")
-async def update_post_metadata(username: str, request: UpdatePostRequest):
-    """更新貼文的店家和地址解析資訊"""
+async def update_post_metadata(username: str, request: BatchUpdatePostRequest):
+    """批次更新貼文的店家和地址解析資訊"""
     try:
         extractor = get_extractor(username)
         
-        success = extractor.update_post_metadata(
-            post_id=request.post_id,
-            parsed_store=request.parsed_store,
-            parsed_address=request.parsed_address
-        )
+        # 轉換 Pydantic 模型為字典列表
+        updates = []
+        for update in request.updates:
+            updates.append({
+                "post_id": update.post_id,
+                "parsed_store": update.parsed_store,
+                "parsed_address": update.parsed_address
+            })
         
-        if success:
+        # 執行批次更新
+        result = extractor.batch_update_post_metadata(updates)
+        
+        if result["success_count"] > 0:
             return {
                 "success": True,
-                "message": f"成功更新貼文 {request.post_id} 的元數據",
-                "post_id": request.post_id,
-                "parsed_store": request.parsed_store,
-                "parsed_address": request.parsed_address
+                "message": f"批次更新完成: 成功 {result['success_count']} 篇，失敗 {result['failed_count']} 篇",
+                "success_count": result["success_count"],
+                "failed_count": result["failed_count"],
+                "success_posts": result["success_posts"],
+                "failed_posts": result["failed_posts"]
             }
         else:
-            raise HTTPException(status_code=404, detail=f"找不到貼文 ID: {request.post_id}")
+            return {
+                "success": False,
+                "message": f"批次更新失敗: 所有 {result['failed_count']} 篇貼文都更新失敗",
+                "success_count": result["success_count"],
+                "failed_count": result["failed_count"],
+                "success_posts": result["success_posts"],
+                "failed_posts": result["failed_posts"]
+            }
             
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error(f"更新貼文元數據時發生錯誤: {e}")
-        raise HTTPException(status_code=500, detail=f"更新貼文元數據時發生錯誤: {str(e)}")
+        logger.error(f"批次更新貼文元數據時發生錯誤: {e}")
+        raise HTTPException(status_code=500, detail=f"批次更新貼文元數據時發生錯誤: {str(e)}")
+
+@app.get("/posts/unparsed/{username}")
+async def get_unparsed_posts(username: str, limit: Optional[int] = 100, offset: int = 0):
+    """獲取尚未解析店家和地址的貼文（只返回 post_id 和 content）"""
+    try:
+        extractor = get_extractor(username)
+        
+        unparsed_posts = extractor.get_unparsed_posts(limit=limit, offset=offset)
+        
+        return {
+            "success": True,
+            "count": len(unparsed_posts),
+            "posts": unparsed_posts,
+            "limit": limit,
+            "offset": offset
+        }
+        
+    except Exception as e:
+        logger.error(f"獲取未解析貼文時發生錯誤: {e}")
+        raise HTTPException(status_code=500, detail=f"獲取未解析貼文時發生錯誤: {str(e)}")
 
 # 錯誤處理
 @app.exception_handler(Exception)

@@ -66,11 +66,11 @@ class InstagramExtractor:
         """提取儲存貼文並直接存入資料庫"""
         if not self.auth_manager.is_logged_in:
             self.logger.error("尚未登入，無法提取貼文")
-            return ExtractResult(success=False, error="未登入")
+            return ExtractResult(success=False, username=self.username, error="未登入")
         
         profile = self.profile_manager.get_profile()
         if profile is None:
-            return ExtractResult(success=False, error="無法獲取個人檔案")
+            return ExtractResult(success=False, username=self.username, error="無法獲取個人檔案")
         
         # 顯示資料庫現有資料
         existing_count = self.db_manager.get_posts_count()
@@ -146,7 +146,7 @@ class InstagramExtractor:
         except Exception as e:
             self.logger.error(f"處理儲存貼文失敗: {e}")
             self.logger.error(f"錯誤類型: {type(e).__name__}")
-            return ExtractResult(success=False, error=str(e))
+            return ExtractResult(success=False, username=self.username, error=str(e))
         
         # 顯示處理結果
         final_count = self.db_manager.get_posts_count()
@@ -154,6 +154,7 @@ class InstagramExtractor:
         
         result = ExtractResult(
             success=True,
+            username=self.username,
             total_found=total_found,
             new_posts=new_count,
             skipped_posts=skipped_count,
@@ -191,6 +192,14 @@ class InstagramExtractor:
     def update_post_metadata(self, post_id: str, parsed_store: Optional[str] = None, parsed_address: Optional[str] = None) -> bool:
         """更新貼文的解析店家和地址資訊"""
         return self.db_manager.update_post_metadata(post_id, parsed_store, parsed_address)
+    
+    def batch_update_post_metadata(self, updates: List[dict]) -> dict:
+        """批次更新多個貼文的解析店家和地址資訊"""
+        return self.db_manager.batch_update_post_metadata(updates)
+    
+    def get_unparsed_posts(self, limit: Optional[int] = None, offset: int = 0) -> List[dict]:
+        """獲取尚未解析店家和地址的貼文"""
+        return self.db_manager.get_unparsed_posts(limit, offset)
     
     def close(self):
         """清理資源"""

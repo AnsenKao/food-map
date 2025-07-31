@@ -39,6 +39,7 @@ class PostData:
 class ExtractResult:
     """提取結果資料結構"""
     success: bool
+    username: Optional[str] = None
     total_found: int = 0
     new_posts: int = 0
     skipped_posts: int = 0
@@ -49,6 +50,7 @@ class ExtractResult:
         """轉換為字典格式"""
         return {
             'success': self.success,
+            'username': self.username,
             'total_found': self.total_found,
             'new_posts': self.new_posts,
             'skipped_posts': self.skipped_posts,
