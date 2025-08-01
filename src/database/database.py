@@ -284,7 +284,7 @@ class DatabaseManager:
                 SELECT post_id, content 
                 FROM posts 
                 WHERE (parsed_store IS NULL OR parsed_store = '') 
-                  AND (parsed_address IS NULL OR parsed_address = '')
+                  AND parsed_address IS NULL
                 ORDER BY post_date DESC
             """
             
@@ -412,6 +412,45 @@ class DatabaseManager:
                 "success_posts": [],
                 "failed_posts": [{"post_id": "批次操作", "error": str(e)}]
             }
+    
+    def get_parsed_posts(self, limit: Optional[int] = None, offset: int = 0) -> List[dict]:
+        """獲取已解析且地址不為空的貼文，返回 post_id, parsed_store, parsed_address"""
+        try:
+            conn = sqlite3.connect(self.database_file)
+            cursor = conn.cursor()
+            
+            # 查詢 parsed_address 不為 NULL 且不為空字串的貼文
+            base_query = """
+                SELECT post_id, parsed_store, parsed_address 
+                FROM posts 
+                WHERE parsed_address IS NOT NULL AND parsed_address != ''
+                ORDER BY updated_at DESC
+            """
+            
+            if limit is not None:
+                query = f"{base_query} LIMIT ? OFFSET ?"
+                cursor.execute(query, (limit, offset))
+            else:
+                query = f"{base_query} OFFSET ?"
+                cursor.execute(query, (offset,))
+            
+            rows = cursor.fetchall()
+            conn.close()
+            
+            # 返回字典格式的結果
+            results = []
+            for row in rows:
+                results.append({
+                    'post_id': row[0],
+                    'parsed_store': row[1],
+                    'parsed_address': row[2]
+                })
+            
+            return results
+            
+        except Exception as e:
+            self.logger.error(f"獲取已解析貼文失敗: {e}")
+            return []
     
     def clear_cache(self):
         """清除快取"""

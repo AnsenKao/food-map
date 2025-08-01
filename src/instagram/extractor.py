@@ -201,6 +201,10 @@ class InstagramExtractor:
         """獲取尚未解析店家和地址的貼文"""
         return self.db_manager.get_unparsed_posts(limit, offset)
     
+    def get_parsed_posts(self, limit: Optional[int] = None, offset: int = 0) -> List[dict]:
+        """獲取已解析且地址不為空的貼文"""
+        return self.db_manager.get_parsed_posts(limit, offset)
+    
     def close(self):
         """清理資源"""
         self.auth_manager.close()

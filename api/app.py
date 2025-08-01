@@ -100,7 +100,8 @@ async def root():
             "search": "POST /search/{username}",
             "status": "GET /status/{username}",
             "update_metadata": "PATCH /posts/update-metadata/{username} (批次更新)",
-            "unparsed_posts": "GET /posts/unparsed/{username}"
+            "unparsed_posts": "GET /posts/unparsed/{username}",
+            "parsed_posts": "GET /posts/parsed/{username}"
         }
     }
 
@@ -372,6 +373,26 @@ async def get_unparsed_posts(username: str, limit: Optional[int] = 100, offset: 
     except Exception as e:
         logger.error(f"獲取未解析貼文時發生錯誤: {e}")
         raise HTTPException(status_code=500, detail=f"獲取未解析貼文時發生錯誤: {str(e)}")
+
+@app.get("/posts/parsed/{username}")
+async def get_parsed_posts(username: str, limit: Optional[int] = 100, offset: int = 0):
+    """獲取已解析且地址不為空的貼文（返回 post_id, parsed_store, parsed_address）"""
+    try:
+        extractor = get_extractor(username)
+        
+        parsed_posts = extractor.get_parsed_posts(limit=limit, offset=offset)
+        
+        return {
+            "success": True,
+            "count": len(parsed_posts),
+            "posts": parsed_posts,
+            "limit": limit,
+            "offset": offset
+        }
+        
+    except Exception as e:
+        logger.error(f"獲取已解析貼文時發生錯誤: {e}")
+        raise HTTPException(status_code=500, detail=f"獲取已解析貼文時發生錯誤: {str(e)}")
 
 # 錯誤處理
 @app.exception_handler(Exception)
