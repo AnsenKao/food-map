@@ -36,7 +36,7 @@ class DatabaseManager:
         return logger
     
     def init_database(self) -> bool:
-        """初始化資料庫，只建立 posts 表"""
+        """初始化資料庫，建立 posts 表並確保包含所有必要欄位"""
         try:
             conn = sqlite3.connect(self.database_file)
             cursor = conn.cursor()
@@ -44,9 +44,23 @@ class DatabaseManager:
             # 檢查是否已有 posts 表
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='posts'")
             if cursor.fetchone():
+                # 檢查是否需要添加新欄位
+                cursor.execute("PRAGMA table_info(posts)")
+                columns = [column[1] for column in cursor.fetchall()]
+                
+                # 如果沒有 parsed_store 欄位，添加它
+                if 'parsed_store' not in columns:
+                    cursor.execute('ALTER TABLE posts ADD COLUMN parsed_store TEXT')
+                    self.logger.info("已添加 parsed_store 欄位")
+                
+                # 如果沒有 parsed_address 欄位，添加它
+                if 'parsed_address' not in columns:
+                    cursor.execute('ALTER TABLE posts ADD COLUMN parsed_address TEXT')
+                    self.logger.info("已添加 parsed_address 欄位")
+                
                 self.logger.info(f"使用現有資料庫: {self.database_file}")
             else:
-                # 只建立 posts 表
+                # 建立包含所有欄位的新表
                 cursor.execute('''
                     CREATE TABLE posts (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -58,6 +72,8 @@ class DatabaseManager:
                         comments INTEGER DEFAULT 0,
                         url TEXT NOT NULL,
                         content TEXT NOT NULL,
+                        parsed_store TEXT,
+                        parsed_address TEXT,
                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
                     )
@@ -67,6 +83,8 @@ class DatabaseManager:
                 cursor.execute('CREATE INDEX idx_posts_author ON posts(author)')
                 cursor.execute('CREATE INDEX idx_posts_date ON posts(post_date)')
                 cursor.execute('CREATE INDEX idx_posts_type ON posts(post_type)')
+                cursor.execute('CREATE INDEX idx_posts_parsed_store ON posts(parsed_store)')
+                cursor.execute('CREATE INDEX idx_posts_parsed_address ON posts(parsed_address)')
                 
                 self.logger.info(f"新資料庫已建立: {self.database_file}")
             
