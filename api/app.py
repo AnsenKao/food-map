@@ -404,7 +404,7 @@ async def get_parsed_posts(username: str, limit: Optional[int] = 100, offset: in
 
 @app.delete("/posts/{username}")
 async def delete_post(username: str, request: DeletePostRequest):
-    """從資料庫刪除指定 ID 的貼文，可選擇是否同時從 Instagram 取消儲存"""
+    """從資料庫刪除指定 ID 的貼文（注意：Instagram 不支援程式化取消儲存）"""
     try:
         extractor = get_extractor(username)
         
@@ -415,15 +415,17 @@ async def delete_post(username: str, request: DeletePostRequest):
         
         if success:
             message = f"成功從資料庫刪除貼文 {request.post_id}"
+            instagram_note = ""
             if request.unsave_from_instagram:
-                message += "，並已嘗試從 Instagram 取消儲存"
+                instagram_note = "注意：Instagram API 不支援程式化取消儲存，請手動在 Instagram 上取消儲存此貼文"
             
             return {
                 "success": True,
                 "message": message,
                 "post_id": request.post_id,
                 "deleted_from_database": True,
-                "unsaved_from_instagram": request.unsave_from_instagram
+                "instagram_unsave_requested": request.unsave_from_instagram,
+                "instagram_note": instagram_note if instagram_note else "未要求取消 Instagram 儲存"
             }
         else:
             raise HTTPException(status_code=404, detail=f"找不到貼文 ID: {request.post_id}")
@@ -434,7 +436,7 @@ async def delete_post(username: str, request: DeletePostRequest):
 
 @app.delete("/posts/batch/{username}")
 async def batch_delete_posts(username: str, request: BatchDeletePostRequest):
-    """從資料庫批次刪除多個貼文，可選擇是否同時從 Instagram 取消儲存"""
+    """從資料庫批次刪除多個貼文（注意：Instagram 不支援程式化取消儲存）"""
     try:
         extractor = get_extractor(username)
         
@@ -444,17 +446,17 @@ async def batch_delete_posts(username: str, request: BatchDeletePostRequest):
         )
         
         message = f"批次操作完成: 從資料庫刪除成功 {results['success_count']} 篇，失敗 {results['failed_count']} 篇"
+        instagram_note = ""
         if request.unsave_from_instagram:
-            ig_success = len(results["instagram_unsave_results"]["success"])
-            ig_failed = len(results["instagram_unsave_results"]["failed"])
-            message += f"；Instagram 取消儲存成功 {ig_success} 篇，失敗 {ig_failed} 篇"
+            instagram_note = "注意：Instagram API 不支援程式化取消儲存，請手動在 Instagram 上取消儲存這些貼文"
         
         return {
             "success": True,
             "message": message,
             "results": results,
             "deleted_from_database": True,
-            "unsaved_from_instagram": request.unsave_from_instagram
+            "instagram_unsave_requested": request.unsave_from_instagram,
+            "instagram_note": instagram_note if instagram_note else "未要求取消 Instagram 儲存"
         }
         
     except Exception as e:

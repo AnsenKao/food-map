@@ -207,24 +207,24 @@ class InstagramExtractor:
     
     def delete_post_by_id(self, post_id: str, unsave_from_instagram: bool = True) -> bool:
         """
-        刪除指定 ID 的貼文，同時可選擇是否從 Instagram 取消儲存
+        從資料庫刪除指定 ID 的貼文
+        注意：Instagram API 不支援程式化取消儲存貼文，需要手動在 Instagram 上操作
         
         Args:
             post_id: 要刪除的貼文 ID (shortcode)
-            unsave_from_instagram: 是否同時從 Instagram 取消儲存該貼文
+            unsave_from_instagram: 保留此參數用於向後相容，但目前無實際功能
             
         Returns:
-            bool: 是否成功刪除
+            bool: 是否成功從資料庫刪除
         """
         try:
-            # 如果選擇從 Instagram 取消儲存
+            # 提醒用戶需要手動取消儲存
             if unsave_from_instagram:
-                if not self._unsave_post_from_instagram(post_id):
-                    self.logger.warning(f"無法從 Instagram 取消儲存貼文 {post_id}，但將繼續從資料庫刪除")
+                self.logger.warning(f"Instagram API 不支援程式化取消儲存貼文 {post_id}，請手動在 Instagram 上取消儲存")
             
             # 從資料庫刪除
             if self.db_manager.delete_post_by_id(post_id):
-                self.logger.info(f"成功刪除貼文 {post_id}")
+                self.logger.info(f"成功從資料庫刪除貼文 {post_id}")
                 return True
             else:
                 return False
@@ -235,11 +235,12 @@ class InstagramExtractor:
     
     def batch_delete_posts(self, post_ids: List[str], unsave_from_instagram: bool = True) -> dict:
         """
-        批次刪除多個貼文，同時可選擇是否從 Instagram 取消儲存
+        從資料庫批次刪除多個貼文
+        注意：Instagram API 不支援程式化取消儲存貼文，需要手動在 Instagram 上操作
         
         Args:
             post_ids: 要刪除的貼文 ID 列表
-            unsave_from_instagram: 是否同時從 Instagram 取消儲存這些貼文
+            unsave_from_instagram: 保留此參數用於向後相容，但目前無實際功能
             
         Returns:
             包含成功、失敗數量和詳細結果的字典
@@ -249,20 +250,13 @@ class InstagramExtractor:
             "failed_count": 0,
             "success_posts": [],
             "failed_posts": [],
-            "instagram_unsave_results": {
-                "success": [],
-                "failed": []
-            }
+            "instagram_unsave_note": "Instagram API 不支援程式化取消儲存，請手動操作"
         }
         
         try:
-            # 如果選擇從 Instagram 取消儲存
+            # 提醒用戶需要手動取消儲存
             if unsave_from_instagram:
-                for post_id in post_ids:
-                    if self._unsave_post_from_instagram(post_id):
-                        results["instagram_unsave_results"]["success"].append(post_id)
-                    else:
-                        results["instagram_unsave_results"]["failed"].append(post_id)
+                self.logger.warning("Instagram API 不支援程式化取消儲存貼文，請手動在 Instagram 上取消儲存這些貼文")
             
             # 批次從資料庫刪除
             db_results = self.db_manager.batch_delete_posts(post_ids)
@@ -282,44 +276,8 @@ class InstagramExtractor:
                 "failed_count": len(post_ids),
                 "success_posts": [],
                 "failed_posts": [{"post_id": "批次操作", "error": str(e)}],
-                "instagram_unsave_results": {"success": [], "failed": post_ids}
+                "instagram_unsave_note": "Instagram API 不支援程式化取消儲存，請手動操作"
             }
-    
-    def _unsave_post_from_instagram(self, post_id: str) -> bool:
-        """
-        從 Instagram 取消儲存指定的貼文
-        
-        Args:
-            post_id: 貼文 ID (shortcode)
-            
-        Returns:
-            bool: 是否成功取消儲存
-        """
-        try:
-            if not self.auth_manager.is_logged_in:
-                self.logger.error("尚未登入，無法取消儲存貼文")
-                return False
-            
-            # 需要 import instaloader
-            import instaloader
-            
-            # 取得貼文物件
-            post = instaloader.Post.from_shortcode(self.auth_manager.loader.context, post_id)
-            
-            # 取消儲存貼文
-            post.unsave()
-            self.logger.info(f"成功從 Instagram 取消儲存貼文 {post_id}")
-            return True
-            
-        except instaloader.exceptions.PostChangedException:
-            self.logger.warning(f"貼文 {post_id} 已被修改或刪除，無法取消儲存")
-            return False
-        except instaloader.exceptions.LoginRequiredException:
-            self.logger.error("需要登入才能取消儲存貼文")
-            return False
-        except Exception as e:
-            self.logger.error(f"從 Instagram 取消儲存貼文 {post_id} 失敗: {e}")
-            return False
     
     def close(self):
         """清理資源"""
