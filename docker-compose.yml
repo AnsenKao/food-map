@@ -50,6 +50,20 @@ services:
     depends_on:
       - instagram-api
 
+  ngrok:
+    image: ngrok/ngrok:latest
+    container_name: ngrok-tunnel
+    volumes:
+      # 掛載 ngrok 配置檔案
+      - ./ngrok.yml:/ngrok.yml
+      # 掛載輸出目錄用於日誌
+      - ./:/output
+    command: start --config /ngrok.yml --log /output/ngrok.log --log-format json --all
+    restart: unless-stopped
+    depends_on:
+      - instagram-api
+      - n8n
+
 volumes:
   instagram_sessions:
     driver: local

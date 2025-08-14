@@ -38,3 +38,6 @@ session-*
 # Temporary files
 *.tmp
 *.temp
+
+# ngrok config
+ngrok.yml
