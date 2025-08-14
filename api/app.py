@@ -48,6 +48,14 @@ class UpdatePostRequest(BaseModel):
 class BatchUpdatePostRequest(BaseModel):
     updates: List[UpdatePostRequest]
 
+class DeletePostRequest(BaseModel):
+    post_id: str
+    unsave_from_instagram: bool = True
+
+class BatchDeletePostRequest(BaseModel):
+    post_ids: List[str]
+    unsave_from_instagram: bool = True
+
 # 應用程式生命週期管理
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -394,6 +402,65 @@ async def get_parsed_posts(username: str, limit: Optional[int] = 100, offset: in
         logger.error(f"獲取已解析貼文時發生錯誤: {e}")
         raise HTTPException(status_code=500, detail=f"獲取已解析貼文時發生錯誤: {str(e)}")
 
+@app.delete("/posts/{username}")
+async def delete_post(username: str, request: DeletePostRequest):
+    """從資料庫刪除指定 ID 的貼文，可選擇是否同時從 Instagram 取消儲存"""
+    try:
+        extractor = get_extractor(username)
+        
+        success = extractor.delete_post_by_id(
+            post_id=request.post_id,
+            unsave_from_instagram=request.unsave_from_instagram
+        )
+        
+        if success:
+            message = f"成功從資料庫刪除貼文 {request.post_id}"
+            if request.unsave_from_instagram:
+                message += "，並已嘗試從 Instagram 取消儲存"
+            
+            return {
+                "success": True,
+                "message": message,
+                "post_id": request.post_id,
+                "deleted_from_database": True,
+                "unsaved_from_instagram": request.unsave_from_instagram
+            }
+        else:
+            raise HTTPException(status_code=404, detail=f"找不到貼文 ID: {request.post_id}")
+        
+    except Exception as e:
+        logger.error(f"刪除貼文時發生錯誤: {e}")
+        raise HTTPException(status_code=500, detail=f"刪除貼文時發生錯誤: {str(e)}")
+
+@app.delete("/posts/batch/{username}")
+async def batch_delete_posts(username: str, request: BatchDeletePostRequest):
+    """從資料庫批次刪除多個貼文，可選擇是否同時從 Instagram 取消儲存"""
+    try:
+        extractor = get_extractor(username)
+        
+        results = extractor.batch_delete_posts(
+            post_ids=request.post_ids,
+            unsave_from_instagram=request.unsave_from_instagram
+        )
+        
+        message = f"批次操作完成: 從資料庫刪除成功 {results['success_count']} 篇，失敗 {results['failed_count']} 篇"
+        if request.unsave_from_instagram:
+            ig_success = len(results["instagram_unsave_results"]["success"])
+            ig_failed = len(results["instagram_unsave_results"]["failed"])
+            message += f"；Instagram 取消儲存成功 {ig_success} 篇，失敗 {ig_failed} 篇"
+        
+        return {
+            "success": True,
+            "message": message,
+            "results": results,
+            "deleted_from_database": True,
+            "unsaved_from_instagram": request.unsave_from_instagram
+        }
+        
+    except Exception as e:
+        logger.error(f"批次刪除貼文時發生錯誤: {e}")
+        raise HTTPException(status_code=500, detail=f"批次刪除貼文時發生錯誤: {str(e)}")
+
 # 錯誤處理
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
@@ -402,7 +469,3 @@ async def global_exception_handler(request, exc):
         status_code=500,
         content={"detail": "內部伺服器錯誤"}
     )
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")

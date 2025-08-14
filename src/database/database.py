@@ -470,6 +470,106 @@ class DatabaseManager:
             self.logger.error(f"獲取已解析貼文失敗: {e}")
             return []
     
+    def delete_post_by_id(self, post_id: str) -> bool:
+        """根據 post_id 刪除貼文"""
+        try:
+            conn = sqlite3.connect(self.database_file)
+            cursor = conn.cursor()
+            
+            # 刪除貼文
+            cursor.execute('DELETE FROM posts WHERE post_id = ?', (post_id,))
+            rows_affected = cursor.rowcount
+            
+            conn.commit()
+            conn.close()
+            
+            if rows_affected > 0:
+                # 從快取中移除
+                if self._processed_ids_cache is not None:
+                    self._processed_ids_cache.discard(post_id)
+                
+                self.logger.info(f"成功刪除貼文 {post_id}")
+                return True
+            else:
+                self.logger.warning(f"找不到貼文 ID: {post_id}")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"刪除貼文失敗: {e}")
+            return False
+    
+    def batch_delete_posts(self, post_ids: List[str]) -> dict:
+        """批次刪除多個貼文
+        
+        Args:
+            post_ids: 要刪除的貼文 ID 列表
+            
+        Returns:
+            包含成功、失敗數量和詳細結果的字典
+        """
+        results = {
+            "success_count": 0,
+            "failed_count": 0,
+            "success_posts": [],
+            "failed_posts": []
+        }
+        
+        try:
+            conn = sqlite3.connect(self.database_file)
+            cursor = conn.cursor()
+            
+            for post_id in post_ids:
+                if not post_id:
+                    results["failed_count"] += 1
+                    results["failed_posts"].append({
+                        "post_id": post_id,
+                        "error": "post_id 為空"
+                    })
+                    continue
+                
+                try:
+                    cursor.execute('DELETE FROM posts WHERE post_id = ?', (post_id,))
+                    rows_affected = cursor.rowcount
+                    
+                    if rows_affected > 0:
+                        results["success_count"] += 1
+                        results["success_posts"].append(post_id)
+                        
+                        # 從快取中移除
+                        if self._processed_ids_cache is not None:
+                            self._processed_ids_cache.discard(post_id)
+                        
+                        self.logger.info(f"成功刪除貼文 {post_id}")
+                    else:
+                        results["failed_count"] += 1
+                        results["failed_posts"].append({
+                            "post_id": post_id,
+                            "error": "找不到該貼文 ID"
+                        })
+                        
+                except Exception as e:
+                    results["failed_count"] += 1
+                    results["failed_posts"].append({
+                        "post_id": post_id,
+                        "error": str(e)
+                    })
+                    self.logger.error(f"刪除貼文 {post_id} 失敗: {e}")
+            
+            conn.commit()
+            conn.close()
+            
+            self.logger.info(f"批次刪除完成: 成功 {results['success_count']} 篇，失敗 {results['failed_count']} 篇")
+            return results
+                
+        except Exception as e:
+            self.logger.error(f"批次刪除貼文失敗: {e}")
+            return {
+                "success_count": 0,
+                "failed_count": len(post_ids),
+                "success_posts": [],
+                "failed_posts": [{"post_id": "批次操作", "error": str(e)}]
+            }
+
     def clear_cache(self):
         """清除快取"""
         self._processed_ids_cache = None
