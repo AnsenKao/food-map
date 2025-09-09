@@ -1,0 +1,558 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://host.docker.internal:8080/verify-2fa/{{ $json.body.username }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "two_factor_code",
+              "value": "={{ $json.body.two_factor_code }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        432,
+        128
+      ],
+      "id": "6bfee92c-aa0e-4538-bf32-d0e459be5415",
+      "name": "2FA"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8080/login",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "username",
+              "value": "={{ $json.body.username }}"
+            },
+            {
+              "name": "password",
+              "value": "={{ $json.body.password }}"
+            },
+            {
+              "name": "use_saved_session",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -416,
+        304
+      ],
+      "id": "b9346db7-75a6-4bbe-8b90-50d9dff8eecf",
+      "name": "login"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://host.docker.internal:8080/extract-sync/{{ $json.username }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {}
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        992,
+        400
+      ],
+      "id": "47d2769c-6b39-4d95-86d6-f9b59a65d92c",
+      "name": "update database"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "60ea830c-76c7-4624-8a5b-e396db36535f",
+              "leftValue": "={{ $json.success }}",
+              "rightValue": "False",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -176,
+        304
+      ],
+      "id": "088a332f-84c6-41c0-a17a-b0dccd41597b",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        624,
+        128
+      ],
+      "id": "895c6987-32dd-431b-a3b9-dc48188bf42e",
+      "name": "repond to 2fa"
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        192,
+        224
+      ],
+      "id": "d2f5334f-29c3-45ba-b56d-652b4104979d",
+      "name": "Respond to 2fa needed"
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        192,
+        400
+      ],
+      "id": "aa649d72-1e85-4b20-a144-b34aa7686bd4",
+      "name": "Respond to login success"
+    },
+    {
+      "parameters": {
+        "url": "=http://host.docker.internal:8080/posts/unparsed/{{ $json.username }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1280,
+        400
+      ],
+      "id": "fb5cefbd-7db9-4788-9fa5-c5e22071892a",
+      "name": "get posts"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "start-login",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -688,
+        304
+      ],
+      "id": "e5dd4ceb-c883-4cbd-b34c-06bb77c307a1",
+      "name": "login webhook",
+      "webhookId": "b29c2511-7601-41ce-9dcb-49dc7e01851f",
+      "notesInFlow": false
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "send-2fa",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        192,
+        16
+      ],
+      "id": "8eb78a82-2bbb-476e-88c1-dc1d57a25e33",
+      "name": "2fa login",
+      "webhookId": "b29c2511-7601-41ce-9dcb-49dc7e01851f"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "你是一個專業的美食資訊提取專家。請分析以上Instagram貼文內容，提取出店家名稱和完整地址資訊。\n\n## 輸入格式\n你將收到一個包含多個貼文的JSON陣列，每個貼文包含：\n- post_id: 貼文ID\n- content: 貼文內容\n\n## 輸出要求\n請以以下JSON格式回應，符合批次更新API的要求：\n\n```json\n{\n  \"updates\": [\n    {\n      \"post_id\": \"貼文ID\",\n      \"parsed_store\": \"店家名稱（如果找不到則為null）\",\n      \"parsed_address\": \"完整地址（如果找不到則為null）\"\n    }\n  ]\n}\n```\n\n## 提取規則\n1. **店家名稱 (parsed_store)**：\n   - 提取餐廳、咖啡廳、小吃店等店家的正式名稱\n   - 忽略修飾詞如\"超好吃的\"、\"推薦\"等\n   - 如果有多個店家，選擇主要介紹的那個\n   - 如果內容中沒有明確店家名稱，設為null\n\n2. **地址 (parsed_address)**：\n   - 提取完整的店家地址（包含縣市、區域、街道、門牌號）\n   - 優先提取完整地址，而非只有區域名稱\n   - 如果只有大概位置描述（如\"在信義區\"），設為null\n   - 地址必須具體到可以導航的程度\n\n3. **品質標準**：\n   - 只提取有高度信心的資訊\n   - 不確定時寧可設為null\n   - 不要猜測或推理沒有明確提到的資訊\n\n\n請嚴格按照此格式輸出，確保JSON格式正確且符合API要求。\n\n## 常見店家類型識別\n- 餐廳：中式、日式、西式、韓式等料理餐廳\n- 咖啡廳：咖啡店、茶飲店、甜點店\n- 小吃店：夜市攤販、路邊攤、傳統小吃\n- 速食店：連鎖速食、便當店\n- 酒吧：酒吧、居酒屋、酒館\n- 早餐店：早餐店、豆漿店\n- 火鍋店：火鍋、燒烤、吃到飽\n- 麵包店：烘焙坊、蛋糕店\n\n## 地址格式範例\n- 完整地址：台北市信義區市府路1號\n- 完整地址：高雄市苓雅區武廟路126巷8號\n- 完整地址：台中市西區台灣大道二段2號\n- 不完整（設為null）：在信義區、西門町附近、車站旁邊",
+        "messages": {
+          "messageValues": [
+            {
+              "type": "HumanMessagePromptTemplate",
+              "message": "=post_id:{{ $json.post_id }}\n\ncontent:{{ $json.content }}"
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        2448,
+        416
+      ],
+      "id": "f22dc9a0-2513-4319-9d43-e92ab9b76f5f",
+      "name": "Basic LLM Chain"
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.first().json.posts.map(p => ({\n  json: p\n}));\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1488,
+        400
+      ],
+      "id": "a950d5fb-aada-43e3-aeeb-dc7ecb6f69f6",
+      "name": "Code"
+    },
+    {
+      "parameters": {
+        "batchSize": 10,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1696,
+        400
+      ],
+      "id": "1808eebd-a74d-4c2d-ad03-43ad64c036e8",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "model": "prod-knowledge-navigator-aoai-gpt-4o",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatAzureOpenAi",
+      "typeVersion": 1,
+      "position": [
+        2384,
+        624
+      ],
+      "id": "4095bf7f-147b-4a9e-a53b-cd13ad85e8cd",
+      "name": "Azure OpenAI Chat Model",
+      "credentials": {
+        "azureOpenAiApi": {
+          "id": "Q0pJGRLeGYptE4XR",
+          "name": "Azure Open AI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const updates = [];\n\nfor (const item of $input.all()) {\n  const rawText = item.json.text;\n\n  // 移除 markdown 包裝\n  const cleanText = rawText\n    .replace(/^```json/, '')\n    .replace(/```$/, '')\n    .trim();\n\n  try {\n    const parsed = JSON.parse(cleanText);\n    if (parsed.updates && Array.isArray(parsed.updates)) {\n      const cleaned = parsed.updates.map(u => ({\n        post_id: u.post_id ?? \"\",\n        parsed_store: u.parsed_store ?? \"\",\n        parsed_address: u.parsed_address ?? \"\"\n      }));\n      updates.push(...cleaned);\n    }\n  } catch (e) {\n    // 忽略解析錯誤\n  }\n}\n\nreturn [\n  {\n    json: {\n      updates\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1904,
+        304
+      ],
+      "id": "3a25192c-6db5-4638-95e4-543683578227",
+      "name": "Code1"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "http://host.docker.internal:8080/posts/update-metadata/corgifatgin",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $input.item.json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2112,
+        304
+      ],
+      "id": "549988d8-22e2-4cef-82be-70139c5cb49c",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\n  \"update\": \"sucess\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        2320,
+        304
+      ],
+      "id": "a371913e-f489-4eec-bcb6-723a762a14d1",
+      "name": "Respond to Webhook"
+    }
+  ],
+  "connections": {
+    "2FA": {
+      "main": [
+        [
+          {
+            "node": "repond to 2fa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "login": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "update database": {
+      "main": [
+        [
+          {
+            "node": "get posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Respond to 2fa needed",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond to login success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "repond to 2fa": {
+      "main": [
+        [
+          {
+            "node": "update database",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond to login success": {
+      "main": [
+        [
+          {
+            "node": "update database",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "get posts": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "login webhook": {
+      "main": [
+        [
+          {
+            "node": "login",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "2fa login": {
+      "main": [
+        [
+          {
+            "node": "2FA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [
+          {
+            "node": "Code1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Azure OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code1": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "7d942a04342eec04051854ab443ae4034eb59a72da225cf89a609029e3a97a6d"
+  }
+}
