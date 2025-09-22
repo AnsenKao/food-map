@@ -1,6 +1,6 @@
 # Instagram Food Map API - Docker 管理
 
-.PHONY: build run stop clean clean-all logs shell help status backup data n8n
+.PHONY: build run stop clean clean-all logs shell help status backup data n8n update-ios-urls restart-with-ios-update
 
 # 預設目標
 help:
@@ -13,10 +13,12 @@ help:
 	@echo "  logs      - 查看日誌"
 	@echo "  shell     - 進入容器 shell"
 	@echo "  restart   - 重新啟動服務"
+	@echo "  restart-with-ios-update - 重新啟動服務並自動更新 iOS URLs"
 	@echo "  status    - 檢查服務狀態"
 	@echo "  backup    - 備份資料庫"
 	@echo "  data      - 顯示資料目錄內容"
 	@echo "  n8n       - 打開 n8n 管理介面"
+	@echo "  update-ios-urls - 更新 iOS app 中的 ngrok URLs"
 
 # 建立映像
 build:
@@ -102,4 +104,15 @@ n8n:
 		echo "請手動打開瀏覽器訪問: http://localhost:5678"; \
 	fi
 	@echo "📝 n8n 管理介面: http://localhost:5678"
+
+# 更新 iOS app 中的 ngrok URLs
+update-ios-urls:
+	@echo "📱 更新 iOS app 中的 ngrok URLs..."
+	@./update-ios-urls.sh
+
+# 重新啟動服務並自動更新 iOS URLs
+restart-with-ios-update: stop run
+	@echo "⏳ 等待 ngrok 服務完全啟動..."
+	@sleep 5
+	@make update-ios-urls
 	@echo "🔗 Instagram API: http://localhost:8080"

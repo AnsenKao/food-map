@@ -53,12 +53,12 @@ services:
   ngrok:
     image: ngrok/ngrok:latest
     container_name: ngrok-tunnel
+    ports:
+      - "4040:4040"  # 暴露 ngrok Web 界面
     volumes:
       # 掛載 ngrok 配置檔案
       - ./ngrok.yml:/ngrok.yml
-      # 掛載輸出目錄用於日誌
-      - ./:/output
-    command: start --config /ngrok.yml --log /output/ngrok.log --log-format json --all
+    command: start --config /ngrok.yml --log /tmp/ngrok.log --log-format json --all
     restart: unless-stopped
     depends_on:
       - instagram-api
@@ -66,6 +66,7 @@ services:
 
 volumes:
   instagram_sessions:
-    driver: local
+    external: true
+    name: food-map_instagram_sessions
   n8n_data:
     driver: local
