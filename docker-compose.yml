@@ -14,12 +14,6 @@ services:
       - API_HOST=0.0.0.0
       - API_PORT=8080
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8080/')"]
-      interval: 60s  # 改成 60 秒檢查一次
-      timeout: 10s
-      retries: 3
-      start_period: 40s
 
   n8n:
     image: n8nio/n8n:latest

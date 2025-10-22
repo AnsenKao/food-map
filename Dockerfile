@@ -28,9 +28,5 @@ USER appuser
 # 暴露端口
 EXPOSE 8080
 
-# 健康檢查
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:8080/')" || exit 1
-
 # 啟動命令
 CMD ["python", "run_api.py"]
