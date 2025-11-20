@@ -60,7 +60,6 @@ services:
 
 volumes:
   instagram_sessions:
-    external: true
-    name: food-map_instagram_sessions
+    driver: local
   n8n_data:
     driver: local
