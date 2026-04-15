@@ -44,15 +44,10 @@ services:
     depends_on:
       - instagram-api
 
-  ngrok:
-    image: ngrok/ngrok:latest
-    container_name: ngrok-tunnel
-    ports:
-      - "4040:4040"  # 暴露 ngrok Web 界面
-    volumes:
-      # 掛載 ngrok 配置檔案
-      - ./ngrok.yml:/ngrok.yml
-    command: start --config /ngrok.yml --log /tmp/ngrok.log --log-format json --all
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared-tunnel
+    command: tunnel --no-autoupdate run --token ${CF_TUNNEL_TOKEN}
     restart: unless-stopped
     depends_on:
       - instagram-api
