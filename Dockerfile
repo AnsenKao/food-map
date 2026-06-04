@@ -20,8 +20,8 @@ COPY . .
 # 建立資料目錄
 RUN mkdir -p /app/data
 
-# 建立非 root 使用者
-RUN groupadd -r appuser && useradd -r -g appuser appuser
+# 建立非 root 使用者（含 home 目錄，讓 Instaloader 可以存 session）
+RUN groupadd -r appuser && useradd -r -g appuser -m appuser
 RUN chown -R appuser:appuser /app
 USER appuser
 

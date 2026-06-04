@@ -114,6 +114,27 @@ async def root():
         }
     }
 
+@app.get("/session/{username}")
+async def check_session(username: str):
+    """檢查 server 端是否已有有效的 Instagram session（不需要密碼）"""
+    try:
+        extractor = get_extractor(username)
+        if extractor.auth_manager.is_logged_in:
+            return {"success": True, "username": username}
+
+        # 嘗試從磁碟載入已存 session
+        try:
+            session_file = extractor.auth_manager.session_file
+            extractor.auth_manager.loader.load_session_from_file(username, session_file)
+            extractor.auth_manager._is_logged_in = True
+            logger.info(f"Session 從磁碟載入成功: {username}")
+            return {"success": True, "username": username}
+        except Exception:
+            return {"success": False, "username": username}
+    except Exception as e:
+        logger.error(f"Session 檢查失敗: {e}")
+        return {"success": False, "username": username}
+
 @app.post("/verify-2fa/{username}")
 async def verify_2fa(username: str, request: TwoFactorRequest):
     """驗證 2FA 驗證碼"""

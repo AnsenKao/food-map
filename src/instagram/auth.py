@@ -5,7 +5,10 @@ Instagram 登入與會話管理模組
 import instaloader
 import getpass
 import logging
+import os
 from typing import Optional
+
+SESSION_DIR = os.environ.get("SESSION_DIR", "/app/data/sessions")
 
 
 class InstagramAuth:
@@ -25,6 +28,8 @@ class InstagramAuth:
         self.logger = logger or self._setup_default_logger()
         
         # Instagram loader 設定
+        os.makedirs(SESSION_DIR, exist_ok=True)
+        self.session_file = os.path.join(SESSION_DIR, f"session-{username}")
         self.loader = instaloader.Instaloader()
         self._configure_loader()
         self._is_logged_in = False
@@ -71,7 +76,7 @@ class InstagramAuth:
         if self.use_saved_session:
             try:
                 self.logger.info("嘗試使用已保存的 session...")
-                self.loader.load_session_from_file(self.username)
+                self.loader.load_session_from_file(self.username, self.session_file)
                 self.logger.info("成功載入已保存的 session")
                 self._is_logged_in = True
                 return True
@@ -95,14 +100,14 @@ class InstagramAuth:
             # 保存 session 供下次使用
             try:
                 self.logger.info("正在保存 session...")
-                self.loader.save_session_to_file()
-                self.logger.info("Session 已保存")
+                self.loader.save_session_to_file(self.session_file)
+                self.logger.info(f"Session 已保存至 {self.session_file}")
             except Exception as e:
                 self.logger.warning(f"保存 session 失敗: {e}")
-            
+
             self._is_logged_in = True
             return True
-            
+
         except instaloader.exceptions.TwoFactorAuthRequiredException:
             self.logger.info("需要雙重驗證 (2FA)")
             self._needs_2fa = True
@@ -140,19 +145,14 @@ class InstagramAuth:
             
             # 保存 session
             try:
-                self.logger.info("正在保存 session...")
-                self.loader.save_session_to_file()
-                self.logger.info("Session 已保存")
+                self.loader.save_session_to_file(self.session_file)
+                self.logger.info(f"Session 已保存至 {self.session_file}")
             except Exception as e:
                 self.logger.warning(f"保存 session 失敗: {e}")
-            
+
             self._is_logged_in = True
             return True
-            
-        except Exception as e:
-            self.logger.error(f"2FA 驗證失敗: {e}")
-            return False
-            
+
         except Exception as e:
             self.logger.error(f"2FA 驗證失敗: {e}")
             return False
