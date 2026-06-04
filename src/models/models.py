@@ -16,6 +16,9 @@ class PostData:
     comments: int
     url: str
     content: str
+    parsed_store: Optional[str] = None
+    parsed_address: Optional[str] = None
+    parsed_category: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
@@ -30,6 +33,9 @@ class PostData:
             'comments': self.comments,
             'url': self.url,
             'content': self.content,
+            'parsed_store': self.parsed_store,
+            'parsed_address': self.parsed_address,
+            'parsed_category': self.parsed_category,
             'created_at': self.created_at,
             'updated_at': self.updated_at
         }

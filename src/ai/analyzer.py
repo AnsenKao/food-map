@@ -34,7 +34,23 @@ SYSTEM_PROMPT = """你是一個專門從 Instagram 美食貼文中提取結構�
 
 <parsed_category>
   從以下類型中選一個最符合的，無法判斷則填「其他」：
-  餐廳、咖啡廳、小吃／夜市、早餐店、火鍋／燒烤、麵包／甜點、酒吧／居酒屋、超市／零售、飯店／住宿、其他
+  日式料理、拉麵、燒肉・燒烤、火鍋、居酒屋・串燒、西式餐廳、港式・粵菜、台式小吃、早餐、異國料理、咖啡廳、甜點・烘焙、飲料店、其他
+
+  分類說明：
+  - 日式料理：壽司、丼飯、天婦羅、定食、omakase（非拉麵、燒肉）
+  - 拉麵：拉麵、蕎麥麵、鍋燒麵
+  - 燒肉・燒烤：日式燒肉、台式燒烤、美式BBQ、巴西烤肉
+  - 火鍋：麻辣鍋、壽喜燒、涮涮鍋、鍋物
+  - 居酒屋・串燒：居酒屋、串燒、串炸、大眾酒場
+  - 西式餐廳：牛排、漢堡、義式、西班牙、法式、美式餐廳
+  - 港式・粵菜：飲茶、茶餐廳、煲仔飯、燒臘、廣東料理
+  - 台式小吃：快炒、滷肉飯、便當、鹽酥雞、小吃攤、夜市
+  - 早餐：蛋餅、豆漿燒餅、飯糰、三明治、早午餐
+  - 異國料理：韓式、越南、泰式、墨西哥、中東、印度等非以上的異國料理
+  - 咖啡廳：咖啡、下午茶、貓咖（主要賣咖啡飲品的空間）
+  - 甜點・烘焙：甜點、冰品、蛋糕、泡芙、麵包、貝果、豆花
+  - 飲料店：手搖飲、茶飲、果汁（以外帶飲料為主）
+  - 其他：SPA、超市、零售、賽車場等無法歸類者
 </parsed_category>
 </field_rules>
 
@@ -53,7 +69,7 @@ post_id: ABC123
 content: 終於來到鬍鬚張魯肉飯！地址在台北市大同區民生西路151號，魯肉飯超入味 #台北美食
 
 輸出：
-{"updates":[{"post_id":"ABC123","parsed_store":"鬍鬚張魯肉飯","parsed_address":"台北市大同區民生西路151號","parsed_category":"小吃／夜市"}]}
+{"updates":[{"post_id":"ABC123","parsed_store":"鬍鬚張魯肉飯","parsed_address":"台北市大同區民生西路151號","parsed_category":"台式小吃"}]}
 
 輸入：
 post_id: DEF456
@@ -63,8 +79,6 @@ content: 信義區新開的咖啡廳好美！拿鐵很好喝，環境超舒適 �
 {"updates":[{"post_id":"DEF456","parsed_store":null,"parsed_address":null,"parsed_category":"咖啡廳"}]}
 </examples>"""
 
-# prefill：強制模型從 JSON 開頭繼續，避免 markdown 包裝
-ASSISTANT_PREFILL = '{"updates":['
 
 
 class PostAnalyzer:
@@ -92,14 +106,12 @@ class PostAnalyzer:
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": posts_text},
-                    # prefill：讓模型從這裡繼續，強制輸出合法 JSON
-                    {"role": "assistant", "content": ASSISTANT_PREFILL},
                 ],
                 temperature=0,
+                response_format={"type": "json_object"},
             )
 
-            # 模型只輸出 prefill 之後的部分，需要補回前綴
-            raw = ASSISTANT_PREFILL + (response.choices[0].message.content or "")
+            raw = response.choices[0].message.content or ""
             parsed = json.loads(raw)
             updates = parsed.get("updates", [])
             # null 轉空字串，確保已分析的貼文不會被重複處理

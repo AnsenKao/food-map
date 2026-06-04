@@ -189,13 +189,17 @@ class InstagramExtractor:
         """取得已處理的貼文數量"""
         return self.db_manager.get_posts_count()
     
-    def update_post_metadata(self, post_id: str, parsed_store: Optional[str] = None, parsed_address: Optional[str] = None) -> bool:
-        """更新貼文的解析店家和地址資訊"""
-        return self.db_manager.update_post_metadata(post_id, parsed_store, parsed_address)
+    def update_post_metadata(self, post_id: str, parsed_store: Optional[str] = None, parsed_address: Optional[str] = None, parsed_category: Optional[str] = None) -> bool:
+        """更新貼文的解析店家、地址和分類資訊"""
+        return self.db_manager.update_post_metadata(post_id, parsed_store, parsed_address, parsed_category)
     
     def batch_update_post_metadata(self, updates: List[dict]) -> dict:
         """批次更新多個貼文的解析店家和地址資訊"""
         return self.db_manager.batch_update_post_metadata(updates)
+
+    def get_uncategorized_posts(self, limit: Optional[int] = None, offset: int = 0) -> List[dict]:
+        """獲取有 parsed_store 但缺少 parsed_category 的貼文"""
+        return self.db_manager.get_uncategorized_posts(limit=limit, offset=offset)
     
     def get_unparsed_posts(self, limit: Optional[int] = None, offset: int = 0) -> List[dict]:
         """獲取尚未解析店家和地址的貼文"""

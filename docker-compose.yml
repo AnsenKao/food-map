@@ -14,7 +14,7 @@ services:
       - API_HOST=0.0.0.0
       - API_PORT=8080
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
-      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-openrouter/auto}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-google/gemini-3.1-flash-lite}
       - ANALYZE_BATCH_SIZE=${ANALYZE_BATCH_SIZE:-10}
     restart: unless-stopped
 

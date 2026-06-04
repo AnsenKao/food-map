@@ -58,6 +58,11 @@ class DatabaseManager:
                     cursor.execute('ALTER TABLE posts ADD COLUMN parsed_address TEXT')
                     self.logger.info("已添加 parsed_address 欄位")
 
+                # 如果沒有 parsed_category 欄位，添加它
+                if 'parsed_category' not in columns:
+                    cursor.execute('ALTER TABLE posts ADD COLUMN parsed_category TEXT')
+                    self.logger.info("已添加 parsed_category 欄位")
+
                 # 補齊可能缺少的 index
                 cursor.execute("SELECT name FROM sqlite_master WHERE type='index'")
                 existing_indexes = {row[0] for row in cursor.fetchall()}
@@ -67,6 +72,7 @@ class DatabaseManager:
                     'idx_posts_type':            'CREATE INDEX idx_posts_type ON posts(post_type)',
                     'idx_posts_parsed_store':    'CREATE INDEX idx_posts_parsed_store ON posts(parsed_store)',
                     'idx_posts_parsed_address':  'CREATE INDEX idx_posts_parsed_address ON posts(parsed_address)',
+                    'idx_posts_parsed_category': 'CREATE INDEX idx_posts_parsed_category ON posts(parsed_category)',
                 }
                 for name, ddl in missing_indexes.items():
                     if name not in existing_indexes:
@@ -102,6 +108,7 @@ class DatabaseManager:
                         content TEXT NOT NULL,
                         parsed_store TEXT,
                         parsed_address TEXT,
+                        parsed_category TEXT,
                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
                     )
@@ -113,6 +120,7 @@ class DatabaseManager:
                 cursor.execute('CREATE INDEX idx_posts_type ON posts(post_type)')
                 cursor.execute('CREATE INDEX idx_posts_parsed_store ON posts(parsed_store)')
                 cursor.execute('CREATE INDEX idx_posts_parsed_address ON posts(parsed_address)')
+                cursor.execute('CREATE INDEX idx_posts_parsed_category ON posts(parsed_category)')
 
                 # updated_at 自動更新 trigger
                 cursor.execute('''
@@ -209,7 +217,7 @@ class DatabaseManager:
             cursor = conn.cursor()
             
             query = '''
-                SELECT post_id, author, post_date, post_type, likes, comments, url, content, created_at, updated_at
+                SELECT post_id, author, post_date, post_type, likes, comments, url, content, parsed_store, parsed_address, parsed_category, created_at, updated_at
                 FROM posts
                 ORDER BY post_date DESC
                 LIMIT ? OFFSET ?
@@ -217,7 +225,7 @@ class DatabaseManager:
             cursor.execute(query, (limit if limit is not None else -1, offset))
             rows = cursor.fetchall()
             conn.close()
-            
+
             posts = []
             for row in rows:
                 posts.append(PostData(
@@ -229,8 +237,11 @@ class DatabaseManager:
                     comments=row[5],
                     url=row[6],
                     content=row[7],
-                    created_at=row[8],
-                    updated_at=row[9]
+                    parsed_store=row[8],
+                    parsed_address=row[9],
+                    parsed_category=row[10],
+                    created_at=row[11],
+                    updated_at=row[12]
                 ))
             
             return posts
@@ -246,12 +257,12 @@ class DatabaseManager:
             cursor = conn.cursor()
             
             query = '''
-                SELECT post_id, author, post_date, post_type, likes, comments, url, content, created_at, updated_at
-                FROM posts 
+                SELECT post_id, author, post_date, post_type, likes, comments, url, content, parsed_store, parsed_address, parsed_category, created_at, updated_at
+                FROM posts
                 WHERE content LIKE ? OR author LIKE ?
                 ORDER BY post_date DESC
             '''
-            
+
             search_term = f'%{keyword}%'
             if limit is not None:
                 query += ' LIMIT ?'
@@ -260,7 +271,7 @@ class DatabaseManager:
                 cursor.execute(query, (search_term, search_term))
             rows = cursor.fetchall()
             conn.close()
-            
+
             posts = []
             for row in rows:
                 posts.append(PostData(
@@ -272,8 +283,11 @@ class DatabaseManager:
                     comments=row[5],
                     url=row[6],
                     content=row[7],
-                    created_at=row[8],
-                    updated_at=row[9]
+                    parsed_store=row[8],
+                    parsed_address=row[9],
+                    parsed_category=row[10],
+                    created_at=row[11],
+                    updated_at=row[12]
                 ))
             
             return posts
@@ -282,8 +296,8 @@ class DatabaseManager:
             self.logger.error(f"搜尋貼文失敗: {e}")
             return []
     
-    def update_post_metadata(self, post_id: str, parsed_store: Optional[str] = None, parsed_address: Optional[str] = None) -> bool:
-        """更新貼文的 parsed_store 和 parsed_address 欄位"""
+    def update_post_metadata(self, post_id: str, parsed_store: Optional[str] = None, parsed_address: Optional[str] = None, parsed_category: Optional[str] = None) -> bool:
+        """更新貼文的 parsed_store、parsed_address 和 parsed_category 欄位"""
         try:
             conn = sqlite3.connect(self.database_file)
             cursor = conn.cursor()
@@ -299,17 +313,21 @@ class DatabaseManager:
             if parsed_address is not None:
                 update_fields.append("parsed_address = ?")
                 params.append(parsed_address)
-            
+
+            if parsed_category is not None:
+                update_fields.append("parsed_category = ?")
+                params.append(parsed_category)
+
             if not update_fields:
                 self.logger.warning("沒有提供要更新的欄位")
                 return False
-            
+
             # 始終更新 updated_at 欄位
             update_fields.append("updated_at = CURRENT_TIMESTAMP")
             params.append(post_id)
-            
+
             sql = f"UPDATE posts SET {', '.join(update_fields)} WHERE post_id = ?"
-            
+
             cursor.execute(sql, params)
             rows_affected = cursor.rowcount
             
@@ -365,12 +383,40 @@ class DatabaseManager:
         except Exception as e:
             self.logger.error(f"獲取未解析貼文失敗: {e}")
             return []
+
+    def get_uncategorized_posts(self, limit: Optional[int] = None, offset: int = 0) -> List[dict]:
+        """獲取有 parsed_store 但缺少 parsed_category 的貼文"""
+        try:
+            conn = sqlite3.connect(self.database_file)
+            cursor = conn.cursor()
+
+            base_query = """
+                SELECT post_id, content
+                FROM posts
+                WHERE parsed_store IS NOT NULL AND parsed_store != ''
+                  AND parsed_category IS NULL
+                ORDER BY post_date DESC
+            """
+
+            if limit is not None:
+                cursor.execute(f"{base_query} LIMIT ? OFFSET ?", (limit, offset))
+            else:
+                cursor.execute(f"{base_query} OFFSET ?", (offset,))
+
+            rows = cursor.fetchall()
+            conn.close()
+
+            return [{'post_id': row[0], 'content': row[1]} for row in rows]
+
+        except Exception as e:
+            self.logger.error(f"獲取未分類貼文失敗: {e}")
+            return []
     
     def batch_update_post_metadata(self, updates: List[dict]) -> dict:
-        """批次更新多個貼文的 parsed_store 和 parsed_address 欄位
-        
+        """批次更新多個貼文的 parsed_store、parsed_address 和 parsed_category 欄位
+
         Args:
-            updates: 包含更新資料的字典列表，每個字典包含 post_id, parsed_store, parsed_address
+            updates: 包含更新資料的字典列表，每個字典包含 post_id, parsed_store, parsed_address, parsed_category
             
         Returns:
             包含成功、失敗數量和詳細結果的字典
@@ -390,7 +436,8 @@ class DatabaseManager:
                 post_id = update.get("post_id")
                 parsed_store = update.get("parsed_store")
                 parsed_address = update.get("parsed_address")
-                
+                parsed_category = update.get("parsed_category")
+
                 if not post_id:
                     results["failed_count"] += 1
                     results["failed_posts"].append({
@@ -410,7 +457,11 @@ class DatabaseManager:
                 if parsed_address is not None:
                     update_fields.append("parsed_address = ?")
                     params.append(parsed_address)
-                
+
+                if parsed_category is not None:
+                    update_fields.append("parsed_category = ?")
+                    params.append(parsed_category)
+
                 if not update_fields:
                     results["failed_count"] += 1
                     results["failed_posts"].append({
@@ -434,7 +485,8 @@ class DatabaseManager:
                         results["success_posts"].append({
                             "post_id": post_id,
                             "parsed_store": parsed_store,
-                            "parsed_address": parsed_address
+                            "parsed_address": parsed_address,
+                            "parsed_category": parsed_category
                         })
                         self.logger.info(f"成功更新貼文 {post_id}")
                     else:
@@ -475,7 +527,7 @@ class DatabaseManager:
 
             # 查詢 parsed_address 不為 NULL 且不為空字串的貼文
             base_query = """
-                SELECT post_id, parsed_store, parsed_address, updated_at
+                SELECT post_id, parsed_store, parsed_address, parsed_category, updated_at
                 FROM posts
                 WHERE parsed_address IS NOT NULL AND parsed_address != ''
                 ORDER BY updated_at DESC
@@ -495,11 +547,12 @@ class DatabaseManager:
             results = []
             for row in rows:
                 # 將 SQLite DATETIME 轉為 ISO8601 格式供 iOS 解析
-                updated_at = row[3].replace(' ', 'T') + 'Z' if row[3] else None
+                updated_at = row[4].replace(' ', 'T') + 'Z' if row[4] else None
                 results.append({
                     'post_id': row[0],
                     'parsed_store': row[1],
                     'parsed_address': row[2],
+                    'parsed_category': row[3],
                     'updated_at': updated_at
                 })
 

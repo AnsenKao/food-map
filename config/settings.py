@@ -29,7 +29,7 @@ class Config:
     
     # OpenRouter AI 設定
     OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
-    OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "openrouter/auto")
+    OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "google/gemini-3.1-flash-lite")
     ANALYZE_BATCH_SIZE = int(os.environ.get("ANALYZE_BATCH_SIZE", "10"))
 
     @classmethod
