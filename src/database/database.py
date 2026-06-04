@@ -52,12 +52,40 @@ class DatabaseManager:
                 if 'parsed_store' not in columns:
                     cursor.execute('ALTER TABLE posts ADD COLUMN parsed_store TEXT')
                     self.logger.info("已添加 parsed_store 欄位")
-                
+
                 # 如果沒有 parsed_address 欄位，添加它
                 if 'parsed_address' not in columns:
                     cursor.execute('ALTER TABLE posts ADD COLUMN parsed_address TEXT')
                     self.logger.info("已添加 parsed_address 欄位")
-                
+
+                # 補齊可能缺少的 index
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='index'")
+                existing_indexes = {row[0] for row in cursor.fetchall()}
+                missing_indexes = {
+                    'idx_posts_author':          'CREATE INDEX idx_posts_author ON posts(author)',
+                    'idx_posts_date':            'CREATE INDEX idx_posts_date ON posts(post_date)',
+                    'idx_posts_type':            'CREATE INDEX idx_posts_type ON posts(post_type)',
+                    'idx_posts_parsed_store':    'CREATE INDEX idx_posts_parsed_store ON posts(parsed_store)',
+                    'idx_posts_parsed_address':  'CREATE INDEX idx_posts_parsed_address ON posts(parsed_address)',
+                }
+                for name, ddl in missing_indexes.items():
+                    if name not in existing_indexes:
+                        cursor.execute(ddl)
+                        self.logger.info(f"已補建 index: {name}")
+
+                # 補 updated_at 自動更新 trigger
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND name='update_posts_updated_at'")
+                if not cursor.fetchone():
+                    cursor.execute('''
+                        CREATE TRIGGER update_posts_updated_at
+                        AFTER UPDATE ON posts
+                        FOR EACH ROW
+                        BEGIN
+                            UPDATE posts SET updated_at = CURRENT_TIMESTAMP WHERE post_id = NEW.post_id;
+                        END
+                    ''')
+                    self.logger.info("已建立 updated_at 自動更新 trigger")
+
                 self.logger.info(f"使用現有資料庫: {self.database_file}")
             else:
                 # 建立包含所有欄位的新表
@@ -85,7 +113,17 @@ class DatabaseManager:
                 cursor.execute('CREATE INDEX idx_posts_type ON posts(post_type)')
                 cursor.execute('CREATE INDEX idx_posts_parsed_store ON posts(parsed_store)')
                 cursor.execute('CREATE INDEX idx_posts_parsed_address ON posts(parsed_address)')
-                
+
+                # updated_at 自動更新 trigger
+                cursor.execute('''
+                    CREATE TRIGGER update_posts_updated_at
+                    AFTER UPDATE ON posts
+                    FOR EACH ROW
+                    BEGIN
+                        UPDATE posts SET updated_at = CURRENT_TIMESTAMP WHERE post_id = NEW.post_id;
+                    END
+                ''')
+
                 self.logger.info(f"新資料庫已建立: {self.database_file}")
             
             conn.commit()
@@ -172,14 +210,11 @@ class DatabaseManager:
             
             query = '''
                 SELECT post_id, author, post_date, post_type, likes, comments, url, content, created_at, updated_at
-                FROM posts 
+                FROM posts
                 ORDER BY post_date DESC
+                LIMIT ? OFFSET ?
             '''
-            
-            if limit:
-                query += f' LIMIT {limit} OFFSET {offset}'
-            
-            cursor.execute(query)
+            cursor.execute(query, (limit if limit is not None else -1, offset))
             rows = cursor.fetchall()
             conn.close()
             
@@ -217,11 +252,12 @@ class DatabaseManager:
                 ORDER BY post_date DESC
             '''
             
-            if limit:
-                query += f' LIMIT {limit}'
-            
             search_term = f'%{keyword}%'
-            cursor.execute(query, (search_term, search_term))
+            if limit is not None:
+                query += ' LIMIT ?'
+                cursor.execute(query, (search_term, search_term, limit))
+            else:
+                cursor.execute(query, (search_term, search_term))
             rows = cursor.fetchall()
             conn.close()
             
@@ -432,38 +468,41 @@ class DatabaseManager:
             }
     
     def get_parsed_posts(self, limit: Optional[int] = None, offset: int = 0) -> List[dict]:
-        """獲取已解析且地址不為空的貼文，返回 post_id, parsed_store, parsed_address"""
+        """獲取已解析且地址不為空的貼文，返回 post_id, parsed_store, parsed_address, updated_at"""
         try:
             conn = sqlite3.connect(self.database_file)
             cursor = conn.cursor()
-            
+
             # 查詢 parsed_address 不為 NULL 且不為空字串的貼文
             base_query = """
-                SELECT post_id, parsed_store, parsed_address 
-                FROM posts 
+                SELECT post_id, parsed_store, parsed_address, updated_at
+                FROM posts
                 WHERE parsed_address IS NOT NULL AND parsed_address != ''
                 ORDER BY updated_at DESC
             """
-            
+
             if limit is not None:
                 query = f"{base_query} LIMIT ? OFFSET ?"
                 cursor.execute(query, (limit, offset))
             else:
                 query = f"{base_query} OFFSET ?"
                 cursor.execute(query, (offset,))
-            
+
             rows = cursor.fetchall()
             conn.close()
-            
+
             # 返回字典格式的結果
             results = []
             for row in rows:
+                # 將 SQLite DATETIME 轉為 ISO8601 格式供 iOS 解析
+                updated_at = row[3].replace(' ', 'T') + 'Z' if row[3] else None
                 results.append({
                     'post_id': row[0],
                     'parsed_store': row[1],
-                    'parsed_address': row[2]
+                    'parsed_address': row[2],
+                    'updated_at': updated_at
                 })
-            
+
             return results
             
         except Exception as e:
