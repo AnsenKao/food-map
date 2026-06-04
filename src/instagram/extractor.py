@@ -197,10 +197,6 @@ class InstagramExtractor:
         """批次更新多個貼文的解析店家和地址資訊"""
         return self.db_manager.batch_update_post_metadata(updates)
 
-    def get_uncategorized_posts(self, limit: Optional[int] = None, offset: int = 0) -> List[dict]:
-        """獲取有 parsed_store 但缺少 parsed_category 的貼文"""
-        return self.db_manager.get_uncategorized_posts(limit=limit, offset=offset)
-    
     def get_unparsed_posts(self, limit: Optional[int] = None, offset: int = 0) -> List[dict]:
         """獲取尚未解析店家和地址的貼文"""
         return self.db_manager.get_unparsed_posts(limit, offset)

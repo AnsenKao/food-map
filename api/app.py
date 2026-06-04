@@ -538,67 +538,6 @@ async def analyze_posts(username: str, background_tasks: BackgroundTasks):
     return {"success": True, "message": f"開始分析 {username} 的未解析貼文"}
 
 
-@app.post("/recategorize/{username}")
-async def recategorize_posts(username: str, background_tasks: BackgroundTasks):
-    """對已解析但缺少分類的貼文補跑 parsed_category（背景執行）"""
-    if not Config.OPENROUTER_API_KEY:
-        raise HTTPException(status_code=500, detail="OPENROUTER_API_KEY 未設定")
-
-    if analyze_status.get(f"recategorize_{username}", {}).get("running"):
-        return {"success": False, "message": f"{username} 的補分類任務已在執行中"}
-
-    analyze_status[f"recategorize_{username}"] = {"running": True, "processed": 0, "updated": 0, "error": None}
-
-    async def run_recategorize():
-        extractor = get_extractor(username)
-        analyzer = PostAnalyzer(logger=logger)
-        batch_size = Config.ANALYZE_BATCH_SIZE
-        total_updated = 0
-        key = f"recategorize_{username}"
-
-        try:
-            while True:
-                # offset 固定為 0：每次更新後已分類的貼文自動從 WHERE IS NULL 結果消失
-                posts = extractor.get_uncategorized_posts(limit=batch_size, offset=0)
-                if not posts:
-                    break
-
-                logger.info(f"[recategorize/{username}] 補分類第 {total_updated + 1}~{total_updated + len(posts)} 篇")
-                updates = await analyzer.analyze_batch(posts)
-
-                # AI 回傳 null 的一律填「其他」，避免同一批貼文無限重試
-                fetched_ids = {p["post_id"] for p in posts}
-                category_updates = []
-                for u in updates:
-                    pid = u.get("post_id")
-                    if pid in fetched_ids:
-                        category_updates.append({
-                            "post_id": pid,
-                            "parsed_category": u.get("parsed_category") or "其他"
-                        })
-                # 補上 AI 沒回傳的 post_id（整批漏掉的）
-                returned_ids = {u.get("post_id") for u in updates}
-                for pid in fetched_ids - returned_ids:
-                    category_updates.append({"post_id": pid, "parsed_category": "其他"})
-
-                if category_updates:
-                    result = extractor.batch_update_post_metadata(category_updates)
-                    total_updated += result["success_count"]
-                    analyze_status[key]["updated"] = total_updated
-                    logger.info(f"[recategorize/{username}] 更新 {result['success_count']} 筆，累計 {total_updated}")
-
-                analyze_status[key]["processed"] = total_updated
-
-        except Exception as e:
-            logger.error(f"[recategorize/{username}] 補分類失敗: {e}")
-            analyze_status[key]["error"] = str(e)
-        finally:
-            analyze_status[key]["running"] = False
-            logger.info(f"[recategorize/{username}] 完成，共更新 {total_updated} 筆")
-
-    background_tasks.add_task(run_recategorize)
-    return {"success": True, "message": f"開始補分類 {username} 的未分類貼文"}
-
 
 @app.get("/analyze/{username}/status")
 async def analyze_status_check(username: str):

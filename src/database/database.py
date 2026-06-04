@@ -384,34 +384,6 @@ class DatabaseManager:
             self.logger.error(f"獲取未解析貼文失敗: {e}")
             return []
 
-    def get_uncategorized_posts(self, limit: Optional[int] = None, offset: int = 0) -> List[dict]:
-        """獲取有 parsed_store 但缺少 parsed_category 的貼文"""
-        try:
-            conn = sqlite3.connect(self.database_file)
-            cursor = conn.cursor()
-
-            base_query = """
-                SELECT post_id, content
-                FROM posts
-                WHERE parsed_store IS NOT NULL AND parsed_store != ''
-                  AND parsed_category IS NULL
-                ORDER BY post_date DESC
-            """
-
-            if limit is not None:
-                cursor.execute(f"{base_query} LIMIT ? OFFSET ?", (limit, offset))
-            else:
-                cursor.execute(f"{base_query} OFFSET ?", (offset,))
-
-            rows = cursor.fetchall()
-            conn.close()
-
-            return [{'post_id': row[0], 'content': row[1]} for row in rows]
-
-        except Exception as e:
-            self.logger.error(f"獲取未分類貼文失敗: {e}")
-            return []
-    
     def batch_update_post_metadata(self, updates: List[dict]) -> dict:
         """批次更新多個貼文的 parsed_store、parsed_address 和 parsed_category 欄位
 
