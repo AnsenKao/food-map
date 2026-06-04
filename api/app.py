@@ -407,7 +407,7 @@ async def get_unparsed_posts(username: str, limit: Optional[int] = 100, offset: 
         raise HTTPException(status_code=500, detail=f"獲取未解析貼文時發生錯誤: {str(e)}")
 
 @app.get("/posts/parsed/{username}")
-async def get_parsed_posts(username: str, limit: Optional[int] = 100, offset: int = 0):
+async def get_parsed_posts(username: str, limit: Optional[int] = None, offset: int = 0):
     """獲取已解析且地址不為空的貼文（返回 post_id, parsed_store, parsed_address）"""
     try:
         extractor = get_extractor(username)

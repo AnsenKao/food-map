@@ -9,6 +9,11 @@ services:
       - ./data:/app/data
       # 持久化 session 檔案
       - ./data/sessions:/home/appuser/.config/instaloader
+      # 掛載 source code 讓 uvicorn --reload 可以熱插拔
+      - ./src:/app/src
+      - ./api:/app/api
+      - ./config:/app/config
+      - ./run_api.py:/app/run_api.py
     environment:
       - PYTHONPATH=/app
       - API_HOST=0.0.0.0

@@ -492,25 +492,24 @@ class DatabaseManager:
             }
     
     def get_parsed_posts(self, limit: Optional[int] = None, offset: int = 0) -> List[dict]:
-        """獲取已解析且地址不為空的貼文，返回 post_id, parsed_store, parsed_address, updated_at"""
+        """獲取已解析且地址不為空的貼文，返回 post_id, parsed_store, parsed_address, created_at"""
         try:
             conn = sqlite3.connect(self.database_file)
             cursor = conn.cursor()
 
             # 查詢 parsed_address 不為 NULL 且不為空字串的貼文
             base_query = """
-                SELECT post_id, parsed_store, parsed_address, parsed_category, updated_at
+                SELECT post_id, parsed_store, parsed_address, parsed_category, created_at
                 FROM posts
                 WHERE parsed_address IS NOT NULL AND parsed_address != ''
-                ORDER BY updated_at DESC
+                ORDER BY created_at DESC
             """
 
             if limit is not None:
                 query = f"{base_query} LIMIT ? OFFSET ?"
                 cursor.execute(query, (limit, offset))
             else:
-                query = f"{base_query} OFFSET ?"
-                cursor.execute(query, (offset,))
+                cursor.execute(base_query)
 
             rows = cursor.fetchall()
             conn.close()
@@ -519,13 +518,13 @@ class DatabaseManager:
             results = []
             for row in rows:
                 # 將 SQLite DATETIME 轉為 ISO8601 格式供 iOS 解析
-                updated_at = row[4].replace(' ', 'T') + 'Z' if row[4] else None
+                created_at = row[4].replace(' ', 'T') + 'Z' if row[4] else None
                 results.append({
                     'post_id': row[0],
                     'parsed_store': row[1],
                     'parsed_address': row[2],
                     'parsed_category': row[3],
-                    'updated_at': updated_at
+                    'created_at': created_at
                 })
 
             return results
