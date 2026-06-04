@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # 導入我們的模組
 from src.instagram.extractor import InstagramExtractor
 from src.models.models import PostData, ExtractResult, UserProfile
+from src.ai.analyzer import PostAnalyzer
 from config.settings import Config
 
 # 設定日誌
@@ -462,6 +463,65 @@ async def batch_delete_posts(username: str, request: BatchDeletePostRequest):
     except Exception as e:
         logger.error(f"批次刪除貼文時發生錯誤: {e}")
         raise HTTPException(status_code=500, detail=f"批次刪除貼文時發生錯誤: {str(e)}")
+
+# analyze 任務狀態追蹤
+analyze_status: dict[str, dict] = {}
+
+@app.post("/analyze/{username}")
+async def analyze_posts(username: str, background_tasks: BackgroundTasks):
+    """對未解析的貼文執行 AI 分析，提取店家名稱與地址（背景執行）"""
+    if not Config.OPENROUTER_API_KEY:
+        raise HTTPException(status_code=500, detail="OPENROUTER_API_KEY 未設定")
+
+    if analyze_status.get(username, {}).get("running"):
+        return {"success": False, "message": f"{username} 的分析任務已在執行中"}
+
+    analyze_status[username] = {"running": True, "processed": 0, "updated": 0, "error": None}
+
+    async def run_analysis():
+        extractor = get_extractor(username)
+        analyzer = PostAnalyzer(logger=logger)
+        batch_size = Config.ANALYZE_BATCH_SIZE
+        offset = 0
+        total_updated = 0
+
+        try:
+            while True:
+                posts = extractor.get_unparsed_posts(limit=batch_size, offset=offset)
+                if not posts:
+                    break
+
+                logger.info(f"[analyze/{username}] 分析第 {offset + 1}~{offset + len(posts)} 篇")
+                updates = await analyzer.analyze_batch(posts)
+
+                if updates:
+                    result = extractor.batch_update_post_metadata(updates)
+                    total_updated += result["success_count"]
+                    analyze_status[username]["updated"] = total_updated
+                    logger.info(f"[analyze/{username}] 更新 {result['success_count']} 筆，累計 {total_updated}")
+
+                analyze_status[username]["processed"] = offset + len(posts)
+                offset += batch_size
+
+        except Exception as e:
+            logger.error(f"[analyze/{username}] 分析失敗: {e}")
+            analyze_status[username]["error"] = str(e)
+        finally:
+            analyze_status[username]["running"] = False
+            logger.info(f"[analyze/{username}] 完成，共更新 {total_updated} 筆")
+
+    background_tasks.add_task(run_analysis)
+    return {"success": True, "message": f"開始分析 {username} 的未解析貼文"}
+
+
+@app.get("/analyze/{username}/status")
+async def analyze_status_check(username: str):
+    """查詢 AI 分析任務狀態"""
+    status = analyze_status.get(username)
+    if not status:
+        return {"running": False, "processed": 0, "updated": 0, "error": None}
+    return status
+
 
 # 錯誤處理
 @app.exception_handler(Exception)

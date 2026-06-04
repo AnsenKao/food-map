@@ -27,6 +27,11 @@ class Config:
         os.makedirs(cls.DATABASE_DIR, exist_ok=True)
         return os.path.join(cls.DATABASE_DIR, f"food_map_{username}.db")
     
+    # OpenRouter AI 設定
+    OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
+    OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "openrouter/auto")
+    ANALYZE_BATCH_SIZE = int(os.environ.get("ANALYZE_BATCH_SIZE", "10"))
+
     @classmethod
     def get_default_database_path(cls) -> str:
         """獲取預設資料庫路徑"""
