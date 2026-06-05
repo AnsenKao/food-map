@@ -63,6 +63,11 @@ class DatabaseManager:
                     cursor.execute('ALTER TABLE posts ADD COLUMN parsed_category TEXT')
                     self.logger.info("已添加 parsed_category 欄位")
 
+                # 如果沒有 visited_at 欄位，添加它
+                if 'visited_at' not in columns:
+                    cursor.execute('ALTER TABLE posts ADD COLUMN visited_at DATETIME')
+                    self.logger.info("已添加 visited_at 欄位")
+
                 # 補齊可能缺少的 index
                 cursor.execute("SELECT name FROM sqlite_master WHERE type='index'")
                 existing_indexes = {row[0] for row in cursor.fetchall()}
@@ -73,6 +78,7 @@ class DatabaseManager:
                     'idx_posts_parsed_store':    'CREATE INDEX idx_posts_parsed_store ON posts(parsed_store)',
                     'idx_posts_parsed_address':  'CREATE INDEX idx_posts_parsed_address ON posts(parsed_address)',
                     'idx_posts_parsed_category': 'CREATE INDEX idx_posts_parsed_category ON posts(parsed_category)',
+                    'idx_posts_visited_at':      'CREATE INDEX idx_posts_visited_at ON posts(visited_at)',
                 }
                 for name, ddl in missing_indexes.items():
                     if name not in existing_indexes:
@@ -109,6 +115,7 @@ class DatabaseManager:
                         parsed_store TEXT,
                         parsed_address TEXT,
                         parsed_category TEXT,
+                        visited_at DATETIME,
                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
                     )
@@ -121,6 +128,7 @@ class DatabaseManager:
                 cursor.execute('CREATE INDEX idx_posts_parsed_store ON posts(parsed_store)')
                 cursor.execute('CREATE INDEX idx_posts_parsed_address ON posts(parsed_address)')
                 cursor.execute('CREATE INDEX idx_posts_parsed_category ON posts(parsed_category)')
+                cursor.execute('CREATE INDEX idx_posts_visited_at ON posts(visited_at)')
 
                 # updated_at 自動更新 trigger
                 cursor.execute('''
@@ -499,7 +507,7 @@ class DatabaseManager:
 
             # 查詢 parsed_address 不為 NULL 且不為空字串的貼文
             base_query = """
-                SELECT post_id, parsed_store, parsed_address, parsed_category, created_at
+                SELECT post_id, parsed_store, parsed_address, parsed_category, visited_at, created_at
                 FROM posts
                 WHERE parsed_address IS NOT NULL AND parsed_address != ''
                 ORDER BY created_at DESC
@@ -518,12 +526,20 @@ class DatabaseManager:
             results = []
             for row in rows:
                 # 將 SQLite DATETIME 轉為 ISO8601 格式供 iOS 解析
-                created_at = row[4].replace(' ', 'T') + 'Z' if row[4] else None
+                # visited_at 可能已帶 Z（由 API 寫入），created_at 由 SQLite CURRENT_TIMESTAMP 產生（不帶 Z）
+                def to_iso(val):
+                    if not val:
+                        return None
+                    val = val.replace(' ', 'T')
+                    return val if val.endswith('Z') else val + 'Z'
+                visited_at  = to_iso(row[4])
+                created_at  = to_iso(row[5])
                 results.append({
                     'post_id': row[0],
                     'parsed_store': row[1],
                     'parsed_address': row[2],
                     'parsed_category': row[3],
+                    'visited_at': visited_at,
                     'created_at': created_at
                 })
 
@@ -632,6 +648,28 @@ class DatabaseManager:
                 "success_posts": [],
                 "failed_posts": [{"post_id": "批次操作", "error": str(e)}]
             }
+
+    def update_visited_at(self, post_id: str, visited_at: Optional[str]) -> bool:
+        """更新貼文的 visited_at 欄位（None 表示清除到訪記錄）"""
+        try:
+            conn = sqlite3.connect(self.database_file)
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE posts SET visited_at = ?, updated_at = CURRENT_TIMESTAMP WHERE post_id = ?",
+                (visited_at, post_id)
+            )
+            rows_affected = cursor.rowcount
+            conn.commit()
+            conn.close()
+            if rows_affected > 0:
+                self.logger.info(f"已更新 visited_at: {post_id} -> {visited_at}")
+                return True
+            else:
+                self.logger.warning(f"找不到貼文 ID: {post_id}")
+                return False
+        except Exception as e:
+            self.logger.error(f"更新 visited_at 失敗: {e}")
+            return False
 
     def clear_cache(self):
         """清除快取"""

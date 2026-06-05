@@ -58,6 +58,10 @@ class BatchDeletePostRequest(BaseModel):
     post_ids: List[str]
     unsave_from_instagram: bool = True
 
+class VisitRequest(BaseModel):
+    post_id: str
+    visited_at: Optional[str] = None  # ISO8601，None 時由 server 產生
+
 # 應用程式生命週期管理
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -425,6 +429,40 @@ async def get_parsed_posts(username: str, limit: Optional[int] = None, offset: i
     except Exception as e:
         logger.error(f"獲取已解析貼文時發生錯誤: {e}")
         raise HTTPException(status_code=500, detail=f"獲取已解析貼文時發生錯誤: {str(e)}")
+
+@app.post("/posts/visit/{username}")
+async def mark_visited(username: str, request: VisitRequest):
+    """標記貼文為已到訪（寫入 visited_at）"""
+    try:
+        from datetime import datetime, timezone
+        extractor = get_extractor(username)
+        visited_at = request.visited_at or datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+        success = extractor.db_manager.update_visited_at(request.post_id, visited_at)
+        if success:
+            return {"success": True, "post_id": request.post_id, "visited_at": visited_at}
+        else:
+            raise HTTPException(status_code=404, detail=f"找不到貼文 ID: {request.post_id}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"標記到訪失敗: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/posts/visit/{username}")
+async def unmark_visited(username: str, request: VisitRequest):
+    """清除貼文的到訪記錄（visited_at = NULL）"""
+    try:
+        extractor = get_extractor(username)
+        success = extractor.db_manager.update_visited_at(request.post_id, None)
+        if success:
+            return {"success": True, "post_id": request.post_id, "visited_at": None}
+        else:
+            raise HTTPException(status_code=404, detail=f"找不到貼文 ID: {request.post_id}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"清除到訪記錄失敗: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/posts/{username}")
 async def delete_post(username: str, request: DeletePostRequest):
