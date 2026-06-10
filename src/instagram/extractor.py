@@ -85,35 +85,25 @@ class InstagramExtractor:
         count = 0
         total_found = 0
         skipped_count = 0
-        
+        STOP_AFTER = 5  # 連續 N 筆都已存在就提早結束
+
         try:
-            # 獲取儲存的貼文
-            self.logger.info("正在獲取儲存貼文清單...")
-            saved_posts = profile.get_saved_posts()
-            
-            # 先收集所有儲存貼文的 shortcode 到 set
-            self.logger.info("正在分析儲存貼文...")
-            saved_posts_list = list(saved_posts)  # 轉換為 list 以便重複使用
-            saved_shortcodes = {post.shortcode for post in saved_posts_list}
-            total_found = len(saved_shortcodes)
-            
-            # 使用 set 差集直接找出需要處理的貼文
-            new_shortcodes = saved_shortcodes - processed_set
-            skipped_count = total_found - len(new_shortcodes)
-            
-            self.logger.info(f"找到 {total_found} 篇儲存貼文，其中 {len(new_shortcodes)} 篇為新貼文")
-            if skipped_count > 0:
-                self.logger.info(f"跳過 {skipped_count} 篇已處理貼文")
-            
-            self.logger.info("開始處理新貼文...")
-            
-            # 只處理新的貼文
-            for post in saved_posts_list:
-                if post.shortcode not in new_shortcodes:
-                    continue  # 跳過已處理的貼文
-                
-                # 移除數量限制，提取所有儲存的貼文
-                
+            self.logger.info("開始處理儲存貼文...")
+            consecutive_seen = 0
+
+            for post in profile.get_saved_posts():
+                total_found += 1
+
+                if post.shortcode in processed_set:
+                    skipped_count += 1
+                    consecutive_seen += 1
+                    if consecutive_seen >= STOP_AFTER:
+                        self.logger.info(f"連續 {STOP_AFTER} 筆已存在，提早結束（共掃描 {total_found} 篇）")
+                        break
+                    continue
+
+                consecutive_seen = 0
+
                 try:
                     self.logger.info(f"處理第 {count + 1} 篇新貼文:")
                     self.logger.info(f"       ID: {post.shortcode}")
@@ -121,13 +111,11 @@ class InstagramExtractor:
                     self.logger.info(f"       時間: {post.date_utc}")
                     self.logger.info(f"       類型: {'影片' if post.is_video else '圖片'}")
                     self.logger.info(f"       互動: {post.likes:,} 讚, {post.comments:,} 留言")
-                    
-                    # 直接儲存到資料庫
+
                     if self.db_manager.save_post(post):
                         count += 1
+                        processed_set.add(post.shortcode)
                         self.logger.info("       ✅ 已儲存到資料庫")
-                        
-                        # 顯示文字內容預覽
                         if post.caption:
                             preview = post.caption[:100] + "..." if len(post.caption) > 100 else post.caption
                             self.logger.info(f"       內容預覽: {preview}")
@@ -135,7 +123,7 @@ class InstagramExtractor:
                             self.logger.info("       內容預覽: （無文字內容）")
                     else:
                         self.logger.warning("       ⚠️ 跳過（可能重複）")
-                    
+
                 except KeyboardInterrupt:
                     self.logger.info("使用者中斷處理")
                     break
