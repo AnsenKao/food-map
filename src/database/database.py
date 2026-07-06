@@ -68,6 +68,15 @@ class DatabaseManager:
                     cursor.execute('ALTER TABLE posts ADD COLUMN visited_at DATETIME')
                     self.logger.info("已添加 visited_at 欄位")
 
+                # 如果沒有 latitude/longitude 欄位，添加它們
+                if 'latitude' not in columns:
+                    cursor.execute('ALTER TABLE posts ADD COLUMN latitude REAL')
+                    self.logger.info("已添加 latitude 欄位")
+
+                if 'longitude' not in columns:
+                    cursor.execute('ALTER TABLE posts ADD COLUMN longitude REAL')
+                    self.logger.info("已添加 longitude 欄位")
+
                 # 補齊可能缺少的 index
                 cursor.execute("SELECT name FROM sqlite_master WHERE type='index'")
                 existing_indexes = {row[0] for row in cursor.fetchall()}
@@ -116,6 +125,8 @@ class DatabaseManager:
                         parsed_address TEXT,
                         parsed_category TEXT,
                         visited_at DATETIME,
+                        latitude REAL,
+                        longitude REAL,
                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
                     )
@@ -175,16 +186,20 @@ class DatabaseManager:
             cursor = conn.cursor()
             
             # 插入貼文資料
+            likes = (post._node.get('edge_media_preview_like', {}) or {}).get('count', 0) or 0
+            comments = (post._node.get('edge_media_to_comment', {}) or {}).get('count', 0) or 0
+            owner = post._node.get('owner', {}) or {}
+            owner_username = owner.get('username') or owner.get('id', 'unknown')
             cursor.execute('''
                 INSERT INTO posts (post_id, author, post_date, post_type, likes, comments, url, content)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 post.shortcode,
-                post.owner_username,
+                owner_username,
                 post.date_utc.isoformat(),
                 '影片' if post.is_video else '圖片',
-                post.likes,
-                post.comments,
+                likes,
+                comments,
                 f"https://www.instagram.com/p/{post.shortcode}/",
                 post.caption or ""
             ))
@@ -417,6 +432,8 @@ class DatabaseManager:
                 parsed_store = update.get("parsed_store")
                 parsed_address = update.get("parsed_address")
                 parsed_category = update.get("parsed_category")
+                latitude = update.get("latitude")
+                longitude = update.get("longitude")
 
                 if not post_id:
                     results["failed_count"] += 1
@@ -425,15 +442,15 @@ class DatabaseManager:
                         "error": "缺少 post_id"
                     })
                     continue
-                
+
                 # 構建動態 SQL 更新語句
                 update_fields = []
                 params = []
-                
+
                 if parsed_store is not None:
                     update_fields.append("parsed_store = ?")
                     params.append(parsed_store)
-                
+
                 if parsed_address is not None:
                     update_fields.append("parsed_address = ?")
                     params.append(parsed_address)
@@ -441,6 +458,14 @@ class DatabaseManager:
                 if parsed_category is not None:
                     update_fields.append("parsed_category = ?")
                     params.append(parsed_category)
+
+                if latitude is not None:
+                    update_fields.append("latitude = ?")
+                    params.append(latitude)
+
+                if longitude is not None:
+                    update_fields.append("longitude = ?")
+                    params.append(longitude)
 
                 if not update_fields:
                     results["failed_count"] += 1
@@ -507,7 +532,7 @@ class DatabaseManager:
 
             # 查詢 parsed_address 不為 NULL 且不為空字串的貼文
             base_query = """
-                SELECT post_id, parsed_store, parsed_address, parsed_category, visited_at, created_at
+                SELECT post_id, parsed_store, parsed_address, parsed_category, visited_at, created_at, latitude, longitude
                 FROM posts
                 WHERE parsed_address IS NOT NULL AND parsed_address != ''
                 ORDER BY created_at DESC
@@ -540,7 +565,9 @@ class DatabaseManager:
                     'parsed_address': row[2],
                     'parsed_category': row[3],
                     'visited_at': visited_at,
-                    'created_at': created_at
+                    'created_at': created_at,
+                    'latitude': row[6],
+                    'longitude': row[7]
                 })
 
             return results

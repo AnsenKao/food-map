@@ -46,6 +46,8 @@ class UpdatePostRequest(BaseModel):
     parsed_store: Optional[str] = None
     parsed_address: Optional[str] = None
     parsed_category: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
 
 class BatchUpdatePostRequest(BaseModel):
     updates: List[UpdatePostRequest]
@@ -90,11 +92,14 @@ app = FastAPI(
 def get_extractor(username: str) -> InstagramExtractor:
     """獲取或建立提取器實例"""
     if username not in extractor_instances:
-        extractor_instances[username] = InstagramExtractor(
+        extractor = InstagramExtractor(
             username=username,
             database_file=Config.get_database_path(username),
             logger=logger
         )
+        # 建立當下就確保資料庫 schema 是最新的，不用等到 /login 才 migrate
+        extractor.init_database()
+        extractor_instances[username] = extractor
     return extractor_instances[username]
 
 # API 路由
@@ -361,7 +366,9 @@ async def update_post_metadata(username: str, request: BatchUpdatePostRequest):
                 "post_id": update.post_id,
                 "parsed_store": update.parsed_store,
                 "parsed_address": update.parsed_address,
-                "parsed_category": update.parsed_category
+                "parsed_category": update.parsed_category,
+                "latitude": update.latitude,
+                "longitude": update.longitude
             })
         
         # 執行批次更新
