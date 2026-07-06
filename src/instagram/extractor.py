@@ -105,12 +105,17 @@ class InstagramExtractor:
                 consecutive_seen = 0
 
                 try:
+                    likes = post._node.get('edge_media_preview_like', {}) or {}
+                    likes_count = likes.get('count', 0) or 0
+                    comments_count = (post._node.get('edge_media_to_comment', {}) or {}).get('count', 0) or 0
                     self.logger.info(f"處理第 {count + 1} 篇新貼文:")
                     self.logger.info(f"       ID: {post.shortcode}")
-                    self.logger.info(f"       作者: @{post.owner_username}")
+                    owner = post._node.get('owner', {}) or {}
+                    owner_username = owner.get('username') or owner.get('id', 'unknown')
+                    self.logger.info(f"       作者: @{owner_username}")
                     self.logger.info(f"       時間: {post.date_utc}")
                     self.logger.info(f"       類型: {'影片' if post.is_video else '圖片'}")
-                    self.logger.info(f"       互動: {post.likes:,} 讚, {post.comments:,} 留言")
+                    self.logger.info(f"       互動: {likes_count:,} 讚, {comments_count:,} 留言")
 
                     if self.db_manager.save_post(post):
                         count += 1
@@ -128,7 +133,9 @@ class InstagramExtractor:
                     self.logger.info("使用者中斷處理")
                     break
                 except Exception as e:
+                    import traceback
                     self.logger.error(f"       ❌ 處理失敗: {e}")
+                    self.logger.error(traceback.format_exc())
                     continue
         
         except Exception as e:
