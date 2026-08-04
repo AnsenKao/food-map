@@ -58,6 +58,11 @@ SYSTEM_PROMPT = """你是一個專門從 Instagram 美食貼文中提取結構�
 只填入有高度信心的資訊。寧可填 null，不要猜測或推論未明確提及的內容。
 </quality_standard>
 
+<language>
+所有輸出文字（parsed_store、parsed_address）必須使用繁體中文（台灣用語），不得使用簡體字。
+即使貼文原文包含簡體字，也一律轉換為繁體輸出。
+</language>
+
 <output_format>
 僅輸出以下 JSON，不得有任何其他文字：
 {"updates":[{"post_id":"...","parsed_store":"...","parsed_address":"...","parsed_category":"..."}]}
