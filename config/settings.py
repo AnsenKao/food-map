@@ -29,7 +29,16 @@ class Config:
     
     # OpenRouter AI 設定
     OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
-    OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "google/gemini-3.1-flash-lite")
+    OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "z-ai/glm-5.3-flash")
+    # GLM 系列預設開啟 thinking，OpenRouter 不允許停用，只能以 effort 壓到 0 reasoning token；
+    # 且僅部分 provider 真的遵守，故一併鎖定 provider（實測 Novita、GMICloud 為 0）。
+    OPENROUTER_REASONING_EFFORT = os.environ.get("OPENROUTER_REASONING_EFFORT", "minimal")
+    OPENROUTER_PROVIDERS = [
+        p.strip() for p in os.environ.get("OPENROUTER_PROVIDERS", "Novita,GMICloud").split(",") if p.strip()
+    ]
+    # 允許在指定 provider 都不可用時改用其他家：可能退回會 thinking 的 provider（較慢較貴），
+    # 但至少拿得到結果，避免分析迴圈空轉。
+    OPENROUTER_ALLOW_FALLBACKS = os.environ.get("OPENROUTER_ALLOW_FALLBACKS", "true").lower() != "false"
     ANALYZE_BATCH_SIZE = int(os.environ.get("ANALYZE_BATCH_SIZE", "10"))
 
     @classmethod

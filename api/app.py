@@ -551,6 +551,11 @@ async def analyze_posts(username: str, background_tasks: BackgroundTasks):
         analyzer = PostAnalyzer(logger=logger)
         batch_size = Config.ANALYZE_BATCH_SIZE
         total_updated = 0
+        # 迴圈靠「分析成功寫入 DB、該批離開待分析集合」推進；若連續數輪毫無進展
+        # （API 失敗或 JSON 解析失敗，temperature=0 重試也會得到相同結果），
+        # 就中止本輪，讓這批貼文維持未分析狀態，下次再重跑。
+        max_stalls = 3
+        stalls = 0
 
         try:
             while True:
@@ -561,14 +566,30 @@ async def analyze_posts(username: str, background_tasks: BackgroundTasks):
                 logger.info(f"[analyze/{username}] 分析第 {total_updated + 1}~{total_updated + len(posts)} 篇")
                 updates = await analyzer.analyze_batch(posts)
 
+                updated_count = 0
                 if updates:
                     for u in updates:
                         if not u.get("parsed_category"):
                             u["parsed_category"] = "其他"
                     result = extractor.batch_update_post_metadata(updates)
-                    total_updated += result["success_count"]
+                    updated_count = result["success_count"]
+                    total_updated += updated_count
                     analyze_status[username]["updated"] = total_updated
-                    logger.info(f"[analyze/{username}] 更新 {result['success_count']} 筆，累計 {total_updated}")
+                    logger.info(f"[analyze/{username}] 更新 {updated_count} 筆，累計 {total_updated}")
+
+                if updated_count > 0:
+                    stalls = 0
+                else:
+                    stalls += 1
+                    logger.warning(
+                        f"[analyze/{username}] 本批未更新任何資料（{stalls}/{max_stalls}），"
+                        f"post_id: {[p['post_id'] for p in posts]}"
+                    )
+                    if stalls >= max_stalls:
+                        msg = f"連續 {max_stalls} 批無法分析，已中止；這批貼文維持未分析，下次會重跑"
+                        logger.error(f"[analyze/{username}] {msg}")
+                        analyze_status[username]["error"] = msg
+                        break
 
                 analyze_status[username]["processed"] = total_updated
 

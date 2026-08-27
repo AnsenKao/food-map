@@ -94,6 +94,20 @@ class PostAnalyzer:
             base_url="https://openrouter.ai/api/v1",
         )
         self.model = Config.OPENROUTER_MODEL
+        self.extra_body = self._build_extra_body()
+
+    @staticmethod
+    def _build_extra_body() -> dict:
+        """組出 OpenRouter 專屬參數；未設定時回傳空 dict，換回其他模型不受影響"""
+        extra: dict = {}
+        if Config.OPENROUTER_REASONING_EFFORT:
+            extra["reasoning"] = {"effort": Config.OPENROUTER_REASONING_EFFORT}
+        if Config.OPENROUTER_PROVIDERS:
+            extra["provider"] = {
+                "order": Config.OPENROUTER_PROVIDERS,
+                "allow_fallbacks": Config.OPENROUTER_ALLOW_FALLBACKS,
+            }
+        return extra
 
     async def analyze_batch(self, posts: list[dict]) -> list[dict]:
         """分析一批貼文，回傳 updates 列表"""
@@ -114,6 +128,7 @@ class PostAnalyzer:
                 ],
                 temperature=0,
                 response_format={"type": "json_object"},
+                extra_body=self.extra_body,
             )
 
             raw = response.choices[0].message.content or ""
