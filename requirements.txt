@@ -1,5 +1,5 @@
 # Core dependencies
-instaloader>=4.10.0
+instaloader>=4.16
 
 # Web framework
 fastapi>=0.104.0

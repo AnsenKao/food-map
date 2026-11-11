@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.12"
 
 [[package]]
@@ -119,7 +119,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.104.0" },
-    { name = "instaloader", specifier = ">=4.10.0" },
+    { name = "instaloader", specifier = ">=4.16" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "requests", specifier = ">=2.32.4" },
     { name = "uvicorn", specifier = ">=0.24.0" },
@@ -145,14 +145,14 @@ wheels = [
 
 [[package]]
 name = "instaloader"
-version = "4.14.2"
+version = "4.16"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/54/c3/55d75581c322a58adb3a9b10dd50a232b47cd7afb5feac86c47496d6e1d9/instaloader-4.14.2.tar.gz", hash = "sha256:e9205098e6ec494cdfe2aef6c56805084cef4008a06d4d78504301f42f8e4d33", size = 65978, upload-time = "2025-07-18T05:51:13.8Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/0b/8e/7e602450eb5460af3ba4c8bfc6e5dce57a085872889de6d2b35ee329f366/instaloader-4.16.tar.gz", hash = "sha256:85c2abedc0a3933cfa7c054661a2fba4bb8a03547e746f571fa503bea1aed331", size = 74108, upload-time = "2026-10-26T21:38:12.419Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d5/78/6d8b2dc432c98ff4592be740826605986846d866c53587f2e14937255642/instaloader-4.14.2-py3-none-any.whl", hash = "sha256:e8c72410405fcbfd16c6e0034a10bccce634d91d59b1b0664b7de813be9d27fd", size = 67970, upload-time = "2025-07-18T05:51:12.512Z" },
+    { url = "https://files.pythonhosted.org/packages/96/e7/4ecfef2a49a869a27a314883804133a9937313b25e5fb679af04e5aa6839/instaloader-4.16-py3-none-any.whl", hash = "sha256:92824be2c64793097f0fb97e9e4a150516996a594cc25b795abd6976263eaa93", size = 75193, upload-time = "2026-10-26T21:38:11.377Z" },
 ]
 
 [[package]]

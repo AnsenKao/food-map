@@ -51,11 +51,13 @@ class ExtractResult:
     skipped_posts: int = 0
     total_in_db: int = 0
     error: Optional[str] = None
+    needs_relogin: bool = False
 
     def to_dict(self) -> dict:
         """轉換為字典格式"""
         return {
             'success': self.success,
+            'needs_relogin': self.needs_relogin,
             'username': self.username,
             'total_found': self.total_found,
             'new_posts': self.new_posts,

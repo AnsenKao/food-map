@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # 導入我們的模組
 from src.instagram.extractor import InstagramExtractor
+from src.instagram.auth import SessionInvalidError
 from src.models.models import PostData, ExtractResult, UserProfile
 from src.ai.analyzer import PostAnalyzer
 from config.settings import Config
@@ -229,6 +230,8 @@ async def get_profile(username: str) -> UserProfile:
         
     except HTTPException:
         raise
+    except SessionInvalidError as e:
+        raise HTTPException(status_code=401, detail=f"Instagram session 已失效，請重新登入（{e}）")
     except Exception as e:
         logger.error(f"獲取個人檔案時發生錯誤: {e}")
         raise HTTPException(status_code=500, detail=f"獲取個人檔案時發生錯誤: {str(e)}")
@@ -280,7 +283,12 @@ async def extract_posts_sync(username: str) -> ExtractResult:
         
         # 同步執行提取
         result = extractor.extract_saved_posts()
-        
+
+        if result.needs_relogin:
+            raise HTTPException(status_code=401, detail=result.error)
+        if not result.success:
+            raise HTTPException(status_code=502, detail=result.error or "提取失敗")
+
         return result
         
     except HTTPException:

@@ -10,6 +10,27 @@ from typing import Optional
 
 SESSION_DIR = os.environ.get("SESSION_DIR", "/app/data/sessions")
 
+# Instagram 回這些訊息代表目前 session 已失效，繼續沿用只會一直失敗。
+# 注意：feedback_required 不在此列，它通常是查詢端點被拒（套件過舊或被限流），
+# 剛登入的新 session 也會遇到，作廢 session 無濟於事。
+SESSION_INVALID_MARKERS = (
+    "checkpoint_required",
+    "challenge_required",
+    "login_required",
+)
+
+
+class SessionInvalidError(Exception):
+    """Instagram session 已失效，需要重新登入"""
+
+
+def is_session_error(error: Exception) -> bool:
+    """判斷例外是否代表 session 已失效"""
+    if isinstance(error, instaloader.exceptions.LoginRequiredException):
+        return True
+    message = str(error).lower()
+    return any(marker in message for marker in SESSION_INVALID_MARKERS)
+
 
 class InstagramAuth:
     """Instagram 認證管理器"""
@@ -157,6 +178,26 @@ class InstagramAuth:
             self.logger.error(f"2FA 驗證失敗: {e}")
             return False
     
+    def invalidate_session(self, reason: str = ""):
+        """作廢目前 session：刪除 session 檔、重建 loader、標記為未登入"""
+        self.logger.warning(f"Session 已失效，作廢並要求重新登入：{reason}")
+        try:
+            os.remove(self.session_file)
+            self.logger.info(f"已刪除 session 檔 {self.session_file}")
+        except FileNotFoundError:
+            pass
+        except Exception as e:
+            self.logger.error(f"刪除 session 檔失敗: {e}")
+
+        try:
+            self.loader.close()
+        except Exception:
+            pass
+        self.loader = instaloader.Instaloader()
+        self._configure_loader()
+        self._is_logged_in = False
+        self._needs_2fa = False
+
     def logout(self):
         """登出"""
         self._is_logged_in = False

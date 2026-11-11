@@ -6,7 +6,7 @@ import logging
 from typing import Optional, List
 from src.models.models import PostData, ExtractResult
 from src.database.database import DatabaseManager
-from src.instagram.auth import InstagramAuth
+from src.instagram.auth import InstagramAuth, is_session_error
 from src.instagram.profile import ProfileManager
 
 
@@ -68,10 +68,6 @@ class InstagramExtractor:
             self.logger.error("尚未登入，無法提取貼文")
             return ExtractResult(success=False, username=self.username, error="未登入")
         
-        profile = self.profile_manager.get_profile()
-        if profile is None:
-            return ExtractResult(success=False, username=self.username, error="無法獲取個人檔案")
-        
         # 顯示資料庫現有資料
         existing_count = self.db_manager.get_posts_count()
         self.logger.info(f"資料庫現有貼文: {existing_count} 篇")
@@ -91,7 +87,7 @@ class InstagramExtractor:
             self.logger.info("開始處理儲存貼文...")
             consecutive_seen = 0
 
-            for post in profile.get_saved_posts():
+            for post in self.profile_manager.iter_saved_posts():
                 total_found += 1
 
                 if post.shortcode in processed_set:
@@ -133,12 +129,18 @@ class InstagramExtractor:
                     self.logger.info("使用者中斷處理")
                     break
                 except Exception as e:
+                    if is_session_error(e):
+                        raise
                     import traceback
                     self.logger.error(f"       ❌ 處理失敗: {e}")
                     self.logger.error(traceback.format_exc())
                     continue
         
         except Exception as e:
+            if is_session_error(e):
+                self.profile_manager.clear_cache()
+                self.auth_manager.invalidate_session(str(e))
+                return self._relogin_result(str(e))
             self.logger.error(f"處理儲存貼文失敗: {e}")
             self.logger.error(f"錯誤類型: {type(e).__name__}")
             return ExtractResult(success=False, username=self.username, error=str(e))
@@ -172,6 +174,15 @@ class InstagramExtractor:
         self.logger.info(f"資料庫檔案: {self.db_manager.database_file}")
         return result
     
+    def _relogin_result(self, reason: str) -> ExtractResult:
+        """session 失效時的回傳結果"""
+        return ExtractResult(
+            success=False,
+            username=self.username,
+            error=f"Instagram session 已失效，請重新登入（{reason}）",
+            needs_relogin=True,
+        )
+
     def get_posts_from_db(self, limit: Optional[int] = None, offset: int = 0) -> List[PostData]:
         """從資料庫獲取貼文資料"""
         return self.db_manager.get_posts(limit, offset)
