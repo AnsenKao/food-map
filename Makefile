@@ -1,6 +1,6 @@
 # Instagram Food Map API - Docker 管理
 
-.PHONY: build run stop clean clean-all logs shell help status backup data n8n update-ios-urls restart
+.PHONY: build run stop clean clean-all logs shell help status backup data restart
 
 # 預設目標
 help:
@@ -16,8 +16,6 @@ help:
 	@echo "  status         - 檢查服務狀態"
 	@echo "  backup         - 備份資料庫"
 	@echo "  data           - 顯示資料目錄內容"
-	@echo "  n8n            - 打開 n8n 管理介面"
-	@echo "  update-ios-urls - 設定 iOS app 中的固定 Cloudflare URLs"
 
 # 建立映像
 build:
@@ -92,19 +90,3 @@ backup:
 		echo "💡 提示：或者直接複製主機資料： cp -r data backups/data_$$(date +%Y%m%d_%H%M%S)"; \
 	fi
 
-# 打開 n8n 管理介面
-n8n:
-	@echo "🚀 正在打開 n8n 管理介面..."
-	@if command -v open >/dev/null 2>&1; then \
-		open http://localhost:5678; \
-	elif command -v xdg-open >/dev/null 2>&1; then \
-		xdg-open http://localhost:5678; \
-	else \
-		echo "請手動打開瀏覽器訪問: http://localhost:5678"; \
-	fi
-	@echo "📝 n8n 管理介面: http://localhost:5678"
-
-# 設定 iOS app 中的固定 Cloudflare URLs
-update-ios-urls:
-	@echo "📱 設定 iOS app 的 Cloudflare URLs..."
-	@./update-ios-urls.sh
