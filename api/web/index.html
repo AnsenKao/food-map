@@ -12,7 +12,7 @@
   :root {
     --bg: #f6f5f2; --panel: #ffffff; --line: #e4e1da; --text: #1f1d1a; --muted: #77726a;
     --accent: #d9622b; --accent-soft: #fbe9df; --danger: #c0392b; --ok: #2e7d4f; --warn: #b7791f;
-    --pin-red: #e0393e; --pin-blue: #2f6fe0; --pin-badge: #f59e0b;
+    --pin-red: #e0393e; --pin-blue: #2f6fe0; --pin-badge: #f59e0b; --me: #0a9d7c;
     --radius: 10px;
   }
   @media (prefers-color-scheme: dark) {
@@ -177,6 +177,16 @@
   .card .links a:hover { text-decoration: underline; }
   .card .actions { justify-content: flex-start; margin-top: 2px; }
   #map.placing, #map.placing .leaflet-interactive { cursor: crosshair; }
+  .locate-btn { display: grid !important; place-items: center; cursor: pointer; }
+  .locate-icon { width: 14px; height: 14px; border-radius: 50%; border: 2px solid currentColor; position: relative; }
+  .locate-icon::after { content: ""; position: absolute; inset: 3px; border-radius: 50%; background: currentColor; }
+  .locate-btn.on { color: var(--me) !important; }
+  .locate-btn.busy .locate-icon { animation: locate-pulse 1s ease-in-out infinite; }
+  @keyframes locate-pulse { 50% { opacity: .3; } }
+  .me-dot {
+    width: 16px; height: 16px; border-radius: 50%; background: var(--me);
+    border: 3px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.15), 0 1px 5px rgba(0,0,0,.4);
+  }
   .map-error { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); padding: 24px; text-align: center; }
   @media (prefers-color-scheme: dark) {
     .leaflet-tile-pane { filter: brightness(.8) contrast(1.05); }
@@ -534,7 +544,8 @@ function mapShown() {
 }
 
 // ---- 地圖 ----
-const mapUI = { map: null, layer: null, groups: [], fitKey: null, needFit: false, fitTimer: null, adjustMarker: null };
+const mapUI = { map: null, layer: null, groups: [], fitKey: null, needFit: false, fitTimer: null, adjustMarker: null,
+  me: { watchId: null, latlng: null, marker: null, circle: null, btn: null, follow: false } };
 
 function initMap() {
   if (!window.L) {
@@ -549,6 +560,86 @@ function initMap() {
   mapUI.layer = L.layerGroup().addTo(map);
   map.on('click', onMapClick);
   mapUI.map = map;
+  addLocateControl(map);
+}
+
+// ---- 目前位置 ----
+// 位置只留在瀏覽器裡畫在地圖上，不會送到後端。
+function addLocateControl(map) {
+  const me = mapUI.me;
+  const Locate = L.Control.extend({
+    options: { position: 'topleft' },
+    onAdd() {
+      const box = el('div', { class: 'leaflet-bar' });
+      me.btn = el('a', { class: 'locate-btn', href: '#', role: 'button', title: '顯示目前位置', 'aria-label': '顯示目前位置' },
+        el('span', { class: 'locate-icon' }));
+      box.append(me.btn);
+      L.DomEvent.disableClickPropagation(box);
+      L.DomEvent.on(me.btn, 'click', (e) => { L.DomEvent.preventDefault(e); locateMe(); });
+      return box;
+    },
+  });
+  map.addControl(new Locate());
+}
+
+function locateMe() {
+  const me = mapUI.me;
+  if (!navigator.geolocation || !window.isSecureContext) {
+    toast('這個瀏覽器或連線方式（需要 HTTPS）無法取得位置', { error: true });
+    return;
+  }
+  if (me.latlng) flyToMe();     // 已經有位置：直接移過去
+  else me.follow = true;        // 還沒有：等第一筆定位回來再移
+  if (me.watchId != null) return;
+  me.btn.classList.add('busy');
+  me.watchId = navigator.geolocation.watchPosition(onMyPosition, onLocateError,
+    { enableHighAccuracy: true, maximumAge: 10000, timeout: 15000 });
+}
+
+function onMyPosition(pos) {
+  const me = mapUI.me;
+  const latlng = [pos.coords.latitude, pos.coords.longitude];
+  me.latlng = latlng;
+  me.btn.classList.remove('busy');
+  me.btn.classList.add('on');
+  if (!me.marker) {
+    const tint = getComputedStyle(document.documentElement).getPropertyValue('--me').trim() || '#0a9d7c';
+    me.circle = L.circle(latlng, { radius: pos.coords.accuracy, color: tint, weight: 1, fillOpacity: .12, interactive: false }).addTo(mapUI.map);
+    me.marker = L.marker(latlng, {
+      icon: L.divIcon({ className: 'pin', html: el('div', { class: 'me-dot' }), iconSize: [22, 22], iconAnchor: [11, 11] }),
+      interactive: false, keyboard: false, zIndexOffset: 500,
+    }).addTo(mapUI.map);
+  } else {
+    me.marker.setLatLng(latlng);
+    me.circle.setLatLng(latlng).setRadius(pos.coords.accuracy);
+  }
+  if (me.follow) { me.follow = false; flyToMe(); }
+}
+
+function flyToMe() {
+  const map = mapUI.map;
+  clearTimeout(mapUI.fitTimer);
+  mapUI.needFit = false;        // 不要被「縮放到全部圖釘」蓋掉
+  map.invalidateSize();
+  const size = map.getSize();
+  const zoom = Math.max(Math.round(map.getZoom()), 16);
+  // 地圖還沒有尺寸，或已經在原地時不要跑飛行動畫（Leaflet 在這兩種情況會算出 NaN 或停在非整數縮放）
+  const offCenter = map.latLngToContainerPoint(mapUI.me.latlng).distanceTo(size.divideBy(2));
+  if (!size.x || !size.y || (offCenter < 3 && zoom === map.getZoom())) map.setView(mapUI.me.latlng, zoom, { animate: false });
+  else map.flyTo(mapUI.me.latlng, zoom, { duration: .6 });
+}
+
+function onLocateError(err) {
+  const me = mapUI.me;
+  if (me.latlng && err.code !== err.PERMISSION_DENIED) return;   // 已有位置時，偶發的逾時不用吵
+  navigator.geolocation.clearWatch(me.watchId);
+  me.watchId = null;
+  me.follow = false;
+  me.btn.classList.remove('busy', 'on');
+  const message = err.code === err.PERMISSION_DENIED
+    ? '位置權限被拒絕，請到瀏覽器的網站設定開啟「位置」後再按一次'
+    : err.code === err.TIMEOUT ? '定位逾時，請再試一次' : '目前無法取得位置';
+  toast(message, { error: true });
 }
 
 // 同 app 的 MapViewModel.groupByGrid：同一格併成一根圖釘，位置取第一筆，順序維持輸入順序
