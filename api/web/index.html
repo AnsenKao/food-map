@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>美食地圖管理</title>
+<style>
+  :root {
+    --bg: #f6f5f2; --panel: #ffffff; --line: #e4e1da; --text: #1f1d1a; --muted: #77726a;
+    --accent: #d9622b; --accent-soft: #fbe9df; --danger: #c0392b; --ok: #2e7d4f; --warn: #b7791f;
+    --radius: 10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17161a; --panel: #212026; --line: #34323a; --text: #ecebe7; --muted: #9d99a3;
+      --accent: #f08a56; --accent-soft: #3a2a22; --danger: #ef6b5c; --ok: #5fc48a; --warn: #e0b057;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+  }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  header {
+    position: sticky; top: 0; z-index: 5; background: var(--bg);
+    border-bottom: 1px solid var(--line); padding: 14px 16px 10px;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; }
+  .top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  h1 { font-size: 19px; margin: 0; margin-right: auto; }
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .controls input[type=search] { flex: 1 1 220px; min-width: 0; }
+  input, select, textarea {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px;
+  }
+  input:focus, select:focus, textarea:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer;
+  }
+  button:hover { border-color: var(--muted); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.danger { color: var(--danger); }
+  button:disabled { opacity: .5; cursor: default; }
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+  .tabs button { border-radius: 999px; padding: 4px 12px; font-size: 14px; }
+  .tabs button[aria-pressed=true] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+  .tabs .n { color: var(--muted); margin-left: 4px; font-variant-numeric: tabular-nums; }
+  main { padding: 12px 16px 80px; }
+  .hint { color: var(--muted); font-size: 13px; margin: 0 0 10px; }
+  .list { display: grid; gap: 8px; }
+  .row {
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 10px 12px; display: grid; gap: 4px 12px; align-items: center;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .row.deleted { opacity: .7; }
+  .name { font-weight: 600; overflow-wrap: anywhere; }
+  .name.empty, .addr.empty { color: var(--muted); font-weight: 400; font-style: italic; }
+  .addr { color: var(--muted); font-size: 14px; overflow-wrap: anywhere; }
+  .meta { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+  .chip { border: 1px solid var(--line); border-radius: 999px; padding: 0 8px; white-space: nowrap; }
+  .chip.cat { color: var(--text); }
+  .chip.warn { color: var(--warn); border-color: currentColor; }
+  .chip.ok { color: var(--ok); border-color: currentColor; }
+  .meta a { color: var(--accent); text-decoration: none; }
+  .meta a:hover { text-decoration: underline; }
+  .actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  .actions button { font-size: 13.5px; padding: 5px 10px; white-space: nowrap; }
+  .actions button.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+  @media (max-width: 620px) {
+    .row { grid-template-columns: minmax(0, 1fr); }
+    .actions { justify-content: flex-start; margin-top: 4px; }
+  }
+  .empty-state { text-align: center; color: var(--muted); padding: 48px 0; }
+  dialog {
+    border: 1px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--text);
+    padding: 0; width: min(560px, calc(100vw - 24px));
+  }
+  dialog::backdrop { background: rgba(0, 0, 0, .45); }
+  dialog form { padding: 18px; display: grid; gap: 12px; }
+  dialog h2 { margin: 0; font-size: 17px; }
+  label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+  label input, label textarea { color: var(--text); font-size: 15px; width: 100%; }
+  .caption {
+    max-height: 170px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px;
+    background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; color: var(--text);
+  }
+  .note { font-size: 13px; color: var(--warn); min-height: 1.4em; margin: 0; }
+  .dialog-actions { display: flex; gap: 8px; justify-content: flex-end; }
+  #toast {
+    position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 20;
+    background: var(--text); color: var(--bg); border-radius: 10px; padding: 9px 14px;
+    display: none; gap: 12px; align-items: center; max-width: calc(100vw - 24px); box-shadow: 0 6px 24px rgba(0,0,0,.25);
+  }
+  #toast.show { display: flex; }
+  #toast.error { background: var(--danger); color: #fff; }
+  #toast button { background: transparent; border: 1px solid currentColor; color: inherit; padding: 3px 10px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <div class="top">
+      <h1>美食地圖管理</h1>
+      <select id="user" aria-label="使用者"></select>
+      <button id="reload" type="button">重新整理</button>
+    </div>
+    <div class="controls">
+      <input id="q" type="search" placeholder="搜尋店名、地址、貼文內容、作者" aria-label="搜尋">
+      <select id="cat" aria-label="分類"></select>
+      <select id="visited" aria-label="到訪狀態">
+        <option value="">到訪：全部</option>
+        <option value="yes">已到訪</option>
+        <option value="no">未到訪</option>
+      </select>
+    </div>
+    <div class="tabs" id="tabs"></div>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+    <p class="hint">這裡的修改會直接寫進資料庫；手機 app 要等下次同步（開啟 app、手動刷新或每小時一次）才會看到。</p>
+    <div class="list" id="list"></div>
+  </div>
+</main>
+
+<dialog id="editor">
+  <form method="dialog" id="editForm">
+    <h2>編輯地點</h2>
+    <label>店名<input id="fStore" autocomplete="off"></label>
+    <label>地址<input id="fAddress" autocomplete="off"></label>
+    <label>分類<input id="fCategory" list="catList" autocomplete="off"></label>
+    <datalist id="catList"></datalist>
+    <label>原始貼文<div class="caption" id="fCaption"></div></label>
+    <p class="note" id="fNote"></p>
+    <div class="dialog-actions">
+      <button type="button" id="cancelEdit">取消</button>
+      <button type="submit" class="primary" id="saveEdit">儲存</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toast" role="status"><span id="toastMsg"></span><button id="toastBtn" type="button" hidden></button></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const state = { user: '', posts: [], tab: 'all', q: '', cat: '', visited: '', editing: null };
+
+const TABS = [
+  { id: 'all',     label: '全部',   test: (p) => !p.deleted_at },
+  { id: 'mapped',  label: '有地址', test: (p) => !p.deleted_at && !!p.parsed_address },
+  { id: 'noaddr',  label: '缺地址', test: (p) => !p.deleted_at && !p.parsed_address },
+  { id: 'nocoord', label: '未定位', test: (p) => !p.deleted_at && !!p.parsed_address && !hasCoord(p) },
+  { id: 'deleted', label: '已刪除', test: (p) => !!p.deleted_at },
+];
+
+function hasCoord(p) { return p.latitude != null && p.longitude != null; }
+
+// ---- API ----
+async function api(method, path, body) {
+  let res;
+  try {
+    res = await fetch(path, {
+      method,
+      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch (e) {
+    throw new Error('連不到伺服器（可能需要重新登入 Cloudflare Access，請重新整理頁面）');
+  }
+  let data = null;
+  try { data = await res.json(); } catch (e) { /* 非 JSON 回應 */ }
+  if (!res.ok || !data) throw new Error((data && data.detail) || `請求失敗（HTTP ${res.status}）`);
+  if (data.success === false) throw new Error(data.message || '操作失敗');
+  return data;
+}
+
+async function loadUsers() {
+  const { users } = await api('GET', '/users');
+  const saved = localStorage.getItem('foodmap.user');
+  $('user').replaceChildren(...users.map((u) => new Option(u, u)));
+  state.user = users.includes(saved) ? saved : (users[0] || '');
+  $('user').value = state.user;
+}
+
+async function loadPosts() {
+  if (!state.user) { state.posts = []; render(); return; }
+  const data = await api('GET', `/posts/manage/${encodeURIComponent(state.user)}`);
+  state.posts = data.posts;
+  render();
+}
+
+// ---- 畫面 ----
+function el(tag, props = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === 'class') node.className = v;
+    else if (k.startsWith('on')) node.addEventListener(k.slice(2), v);
+    else if (v !== false && v != null) node.setAttribute(k, v === true ? '' : v);
+  }
+  node.append(...children.filter((c) => c != null && c !== false));
+  return node;
+}
+
+function fmtDate(value) {
+  if (!value) return '';
+  // SQLite 的 CURRENT_TIMESTAMP 是不帶時區的 UTC
+  const iso = value.includes('T') ? value : value.replace(' ', 'T');
+  const d = new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? iso : iso + 'Z');
+  return isNaN(d) ? value : d.toLocaleDateString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit' });
+}
+
+function matches(p) {
+  if (state.cat && (p.parsed_category || '') !== state.cat) return false;
+  if (state.visited === 'yes' && !p.visited_at) return false;
+  if (state.visited === 'no' && p.visited_at) return false;
+  if (state.q) {
+    const hay = [p.parsed_store, p.parsed_address, p.parsed_category, p.content, p.author].join('\n').toLowerCase();
+    if (!hay.includes(state.q.toLowerCase())) return false;
+  }
+  return true;
+}
+
+function renderFilters() {
+  const cats = [...new Set(state.posts.map((p) => p.parsed_category).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+  if (state.cat && !cats.includes(state.cat)) state.cat = '';
+  $('cat').replaceChildren(new Option('分類：全部', ''), ...cats.map((c) => new Option(c, c)));
+  $('cat').value = state.cat;
+  $('catList').replaceChildren(...cats.map((c) => new Option(c, c)));
+
+  const filtered = state.posts.filter(matches);
+  $('tabs').replaceChildren(...TABS.map((t) =>
+    el('button', { type: 'button', 'aria-pressed': String(state.tab === t.id), onclick: () => { state.tab = t.id; render(); } },
+      t.label, el('span', { class: 'n' }, String(filtered.filter(t.test).length)))
+  ));
+}
+
+function renderRow(p) {
+  const deleted = !!p.deleted_at;
+  const meta = el('div', { class: 'meta' },
+    p.parsed_category ? el('span', { class: 'chip cat' }, p.parsed_category) : null,
+    p.visited_at ? el('span', { class: 'chip ok' }, `已到訪 ${fmtDate(p.visited_at)}`) : null,
+    !deleted && p.parsed_address && !hasCoord(p) ? el('span', { class: 'chip warn', title: 'app 下次同步時會重新定位' }, '未定位') : null,
+    deleted ? el('span', { class: 'chip warn' }, `已刪除 ${fmtDate(p.deleted_at)}`) : null,
+    el('span', {}, `@${p.author}`),
+    el('span', {}, `加入 ${fmtDate(p.created_at)}`),
+    el('a', { href: p.url, target: '_blank', rel: 'noopener noreferrer' }, 'IG 貼文'),
+  );
+  const info = el('div', {},
+    el('div', { class: 'name' + (p.parsed_store ? '' : ' empty') }, p.parsed_store || '（沒有店名）'),
+    el('div', { class: 'addr' + (p.parsed_address ? '' : ' empty') }, p.parsed_address || '（沒有地址，不會出現在 app 地圖上）'),
+    meta,
+  );
+  const actions = deleted
+    ? el('div', { class: 'actions' }, el('button', { type: 'button', onclick: () => restore(p) }, '還原'))
+    : el('div', { class: 'actions' },
+        el('button', { type: 'button', class: p.visited_at ? 'on' : '', 'aria-pressed': String(!!p.visited_at), onclick: () => toggleVisited(p) },
+          p.visited_at ? '取消到訪' : '標記到訪'),
+        el('button', { type: 'button', onclick: () => openEditor(p) }, '編輯'),
+        el('button', { type: 'button', class: 'danger', onclick: () => remove(p) }, '刪除'),
+      );
+  return el('div', { class: 'row' + (deleted ? ' deleted' : '') }, info, actions);
+}
+
+function render() {
+  renderFilters();
+  const tab = TABS.find((t) => t.id === state.tab);
+  const rows = state.posts.filter((p) => tab.test(p) && matches(p));
+  $('list').replaceChildren(...(rows.length
+    ? rows.map(renderRow)
+    : [el('div', { class: 'empty-state' }, state.posts.length ? '沒有符合條件的貼文' : '這個使用者還沒有任何貼文')]));
+}
+
+// ---- 提示 ----
+let toastTimer = null;
+function toast(message, { error = false, actionLabel = null, onAction = null } = {}) {
+  clearTimeout(toastTimer);
+  $('toastMsg').textContent = message;
+  $('toast').className = 'show' + (error ? ' error' : '');
+  const btn = $('toastBtn');
+  btn.hidden = !actionLabel;
+  btn.textContent = actionLabel || '';
+  btn.onclick = onAction ? () => { $('toast').className = ''; onAction(); } : null;
+  toastTimer = setTimeout(() => { $('toast').className = ''; }, actionLabel ? 8000 : 3500);
+}
+
+async function run(action, doneMessage, toastOptions) {
+  try {
+    await action();
+    await loadPosts();
+    if (doneMessage) toast(doneMessage, toastOptions);
+    return true;
+  } catch (e) {
+    toast(e.message, { error: true });
+    return false;
+  }
+}
+
+// ---- 操作 ----
+const userPath = (prefix) => `${prefix}/${encodeURIComponent(state.user)}`;
+
+function toggleVisited(p) {
+  const method = p.visited_at ? 'DELETE' : 'POST';
+  return run(() => api(method, userPath('/posts/visit'), { post_id: p.post_id }), p.visited_at ? '已取消到訪' : '已標記到訪');
+}
+
+function restore(p) {
+  return run(() => api('POST', userPath('/posts/restore'), { post_id: p.post_id }), `已還原「${p.parsed_store || p.post_id}」`);
+}
+
+function remove(p) {
+  // 軟刪除可以還原，所以不跳確認視窗，改給「復原」
+  return run(
+    () => api('DELETE', userPath('/posts'), { post_id: p.post_id, unsave_from_instagram: false }),
+    `已刪除「${p.parsed_store || p.post_id}」`,
+    { actionLabel: '復原', onAction: () => restore(p) },
+  );
+}
+
+function openEditor(p) {
+  state.editing = p;
+  $('fStore').value = p.parsed_store || '';
+  $('fAddress').value = p.parsed_address || '';
+  $('fCategory').value = p.parsed_category || '';
+  $('fCaption').textContent = p.content || '（沒有內文）';
+  updateEditNote();
+  $('editor').showModal();
+}
+
+function updateEditNote() {
+  const p = state.editing;
+  if (!p) return;
+  const addr = $('fAddress').value.trim();
+  const changed = addr !== (p.parsed_address || '');
+  $('fNote').textContent = !changed ? ''
+    : addr === '' ? '清空地址後，這筆會從 app 的地圖與列表消失。'
+    : '地址改了，舊座標會清除，app 下次同步時重新定位。';
+}
+
+async function saveEdit(event) {
+  event.preventDefault();
+  const p = state.editing;
+  const next = {
+    parsed_store: $('fStore').value.trim(),
+    parsed_address: $('fAddress').value.trim(),
+    parsed_category: $('fCategory').value.trim(),
+  };
+  // 只送有改的欄位；後端把沒給的欄位當成「不動」
+  const update = { post_id: p.post_id };
+  for (const [key, value] of Object.entries(next)) {
+    if (value !== (p[key] || '')) update[key] = value;
+  }
+  if (Object.keys(update).length === 1) { $('editor').close(); return; }
+  $('saveEdit').disabled = true;
+  const ok = await run(() => api('PATCH', userPath('/posts/update-metadata'), { updates: [update] }), '已儲存');
+  $('saveEdit').disabled = false;
+  if (ok) $('editor').close();
+}
+
+// ---- 事件 ----
+$('q').addEventListener('input', (e) => { state.q = e.target.value.trim(); render(); });
+$('cat').addEventListener('change', (e) => { state.cat = e.target.value; render(); });
+$('visited').addEventListener('change', (e) => { state.visited = e.target.value; render(); });
+$('user').addEventListener('change', (e) => {
+  state.user = e.target.value;
+  localStorage.setItem('foodmap.user', state.user);
+  state.cat = '';
+  run(async () => {});
+});
+$('reload').addEventListener('click', () => run(async () => {}, '已重新整理'));
+$('fAddress').addEventListener('input', updateEditNote);
+$('cancelEdit').addEventListener('click', () => $('editor').close());
+$('editForm').addEventListener('submit', saveEdit);
+
+(async () => {
+  try {
+    await loadUsers();
+    await loadPosts();
+  } catch (e) {
+    toast(e.message, { error: true });
+  }
+})();
+</script>
+</body>
+</html>

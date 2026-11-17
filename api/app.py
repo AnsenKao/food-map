@@ -5,9 +5,10 @@ FastAPI 應用程式 - Instagram 貼文提取器 API
 import sys
 import os
 from fastapi import FastAPI, HTTPException, BackgroundTasks
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 from pydantic import BaseModel
 from typing import Optional, List
+import glob
 import logging
 from contextlib import asynccontextmanager
 import instaloader
@@ -61,6 +62,9 @@ class BatchDeletePostRequest(BaseModel):
     post_ids: List[str]
     unsave_from_instagram: bool = True
 
+class RestorePostRequest(BaseModel):
+    post_id: str
+
 class VisitRequest(BaseModel):
     post_id: str
     visited_at: Optional[str] = None  # ISO8601，None 時由 server 產生
@@ -98,8 +102,11 @@ def get_extractor(username: str) -> InstagramExtractor:
             database_file=Config.get_database_path(username),
             logger=logger
         )
-        # 建立當下就確保資料庫 schema 是最新的，不用等到 /login 才 migrate
-        extractor.init_database()
+        # 建立當下就確保資料庫 schema 是最新的，不用等到 /login 才 migrate。
+        # migrate 失敗就不要快取這個實例：否則之後每個查詢都會撞到缺欄位，
+        # 而且要等到重啟才會再試一次。
+        if not extractor.init_database():
+            raise HTTPException(status_code=500, detail=f"{username} 的資料庫初始化失敗")
         extractor_instances[username] = extractor
     return extractor_instances[username]
 
@@ -121,7 +128,10 @@ async def root():
             "status": "GET /status/{username}",
             "update_metadata": "PATCH /posts/update-metadata/{username} (批次更新)",
             "unparsed_posts": "GET /posts/unparsed/{username}",
-            "parsed_posts": "GET /posts/parsed/{username}"
+            "parsed_posts": "GET /posts/parsed/{username}",
+            "manage_posts": "GET /posts/manage/{username} (含未解析與已刪除)",
+            "restore_post": "POST /posts/restore/{username}",
+            "web": "GET /web (管理網頁)"
         }
     }
 
@@ -481,7 +491,7 @@ async def unmark_visited(username: str, request: VisitRequest):
 
 @app.delete("/posts/{username}")
 async def delete_post(username: str, request: DeletePostRequest):
-    """從資料庫刪除指定 ID 的貼文（注意：Instagram 不支援程式化取消儲存）"""
+    """軟刪除指定 ID 的貼文（寫入 deleted_at，可用 /posts/restore 還原；Instagram 不支援程式化取消儲存）"""
     try:
         extractor = get_extractor(username)
         
@@ -507,13 +517,15 @@ async def delete_post(username: str, request: DeletePostRequest):
         else:
             raise HTTPException(status_code=404, detail=f"找不到貼文 ID: {request.post_id}")
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"刪除貼文時發生錯誤: {e}")
         raise HTTPException(status_code=500, detail=f"刪除貼文時發生錯誤: {str(e)}")
 
 @app.delete("/posts/batch/{username}")
 async def batch_delete_posts(username: str, request: BatchDeletePostRequest):
-    """從資料庫批次刪除多個貼文（注意：Instagram 不支援程式化取消儲存）"""
+    """批次軟刪除多個貼文（寫入 deleted_at；Instagram 不支援程式化取消儲存）"""
     try:
         extractor = get_extractor(username)
         
@@ -539,6 +551,52 @@ async def batch_delete_posts(username: str, request: BatchDeletePostRequest):
     except Exception as e:
         logger.error(f"批次刪除貼文時發生錯誤: {e}")
         raise HTTPException(status_code=500, detail=f"批次刪除貼文時發生錯誤: {str(e)}")
+
+@app.post("/posts/restore/{username}")
+async def restore_post(username: str, request: RestorePostRequest):
+    """還原已軟刪除的貼文（deleted_at = NULL）"""
+    try:
+        extractor = get_extractor(username)
+        if extractor.db_manager.restore_post(request.post_id):
+            return {"success": True, "post_id": request.post_id}
+        raise HTTPException(status_code=404, detail=f"找不到貼文 ID: {request.post_id}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"還原貼文時發生錯誤: {e}")
+        raise HTTPException(status_code=500, detail=f"還原貼文時發生錯誤: {str(e)}")
+
+@app.get("/posts/manage/{username}")
+async def get_manage_posts(username: str):
+    """管理網頁用：回傳所有貼文的完整欄位，包含沒有地址的與已軟刪除的"""
+    # 不存在的使用者直接 404，避免管理網頁打錯名字就憑空建出一個空資料庫
+    if not os.path.exists(Config.get_database_path(username)):
+        raise HTTPException(status_code=404, detail=f"找不到使用者 {username} 的資料庫")
+    try:
+        extractor = get_extractor(username)
+        posts = extractor.db_manager.get_manage_posts()
+        return {"success": True, "count": len(posts), "posts": posts}
+    except Exception as e:
+        logger.error(f"獲取管理清單時發生錯誤: {e}")
+        raise HTTPException(status_code=500, detail=f"獲取管理清單時發生錯誤: {str(e)}")
+
+@app.get("/users")
+async def list_users():
+    """列出已有資料庫的使用者（管理網頁的使用者選單用）"""
+    prefix, suffix = "food_map_", ".db"
+    users = sorted(
+        os.path.basename(path)[len(prefix):-len(suffix)]
+        for path in glob.glob(os.path.join(Config.DATABASE_DIR, f"{prefix}*{suffix}"))
+    )
+    return {"success": True, "users": users}
+
+WEB_INDEX = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web", "index.html")
+
+@app.get("/web", response_class=HTMLResponse)
+async def web_index():
+    """管理網頁（單一 HTML 檔，放在 api/ 底下所以跟程式碼一樣免重 build）"""
+    with open(WEB_INDEX, encoding="utf-8") as f:
+        return HTMLResponse(f.read(), headers={"Cache-Control": "no-cache"})
 
 # analyze 任務狀態追蹤
 analyze_status: dict[str, dict] = {}

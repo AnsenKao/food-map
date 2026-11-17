@@ -77,6 +77,12 @@ class DatabaseManager:
                     cursor.execute('ALTER TABLE posts ADD COLUMN longitude REAL')
                     self.logger.info("已添加 longitude 欄位")
 
+                # 軟刪除：deleted_at 非 NULL 代表已刪除。資料列保留是為了讓抓取流程
+                # 仍把它視為「已處理」，不會因為 IG 上還是已儲存就又抓回來。
+                if 'deleted_at' not in columns:
+                    cursor.execute('ALTER TABLE posts ADD COLUMN deleted_at DATETIME')
+                    self.logger.info("已添加 deleted_at 欄位")
+
                 # 補齊可能缺少的 index
                 cursor.execute("SELECT name FROM sqlite_master WHERE type='index'")
                 existing_indexes = {row[0] for row in cursor.fetchall()}
@@ -88,6 +94,7 @@ class DatabaseManager:
                     'idx_posts_parsed_address':  'CREATE INDEX idx_posts_parsed_address ON posts(parsed_address)',
                     'idx_posts_parsed_category': 'CREATE INDEX idx_posts_parsed_category ON posts(parsed_category)',
                     'idx_posts_visited_at':      'CREATE INDEX idx_posts_visited_at ON posts(visited_at)',
+                    'idx_posts_deleted_at':      'CREATE INDEX idx_posts_deleted_at ON posts(deleted_at)',
                 }
                 for name, ddl in missing_indexes.items():
                     if name not in existing_indexes:
@@ -127,6 +134,7 @@ class DatabaseManager:
                         visited_at DATETIME,
                         latitude REAL,
                         longitude REAL,
+                        deleted_at DATETIME,
                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
                     )
@@ -140,6 +148,7 @@ class DatabaseManager:
                 cursor.execute('CREATE INDEX idx_posts_parsed_address ON posts(parsed_address)')
                 cursor.execute('CREATE INDEX idx_posts_parsed_category ON posts(parsed_category)')
                 cursor.execute('CREATE INDEX idx_posts_visited_at ON posts(visited_at)')
+                cursor.execute('CREATE INDEX idx_posts_deleted_at ON posts(deleted_at)')
 
                 # updated_at 自動更新 trigger
                 cursor.execute('''
@@ -242,6 +251,7 @@ class DatabaseManager:
             query = '''
                 SELECT post_id, author, post_date, post_type, likes, comments, url, content, parsed_store, parsed_address, parsed_category, created_at, updated_at
                 FROM posts
+                WHERE deleted_at IS NULL
                 ORDER BY post_date DESC
                 LIMIT ? OFFSET ?
             '''
@@ -282,7 +292,7 @@ class DatabaseManager:
             query = '''
                 SELECT post_id, author, post_date, post_type, likes, comments, url, content, parsed_store, parsed_address, parsed_category, created_at, updated_at
                 FROM posts
-                WHERE content LIKE ? OR author LIKE ?
+                WHERE (content LIKE ? OR author LIKE ?) AND deleted_at IS NULL
                 ORDER BY post_date DESC
             '''
 
@@ -336,6 +346,12 @@ class DatabaseManager:
             if parsed_address is not None:
                 update_fields.append("parsed_address = ?")
                 params.append(parsed_address)
+                # 地址變了，舊座標就不再正確：清掉讓 app 下次同步重新定位
+                # （SET 右側讀到的是更新前的值，所以這裡比的是舊地址）
+                update_fields.append("latitude = CASE WHEN parsed_address IS ? THEN latitude ELSE NULL END")
+                params.append(parsed_address)
+                update_fields.append("longitude = CASE WHEN parsed_address IS ? THEN longitude ELSE NULL END")
+                params.append(parsed_address)
 
             if parsed_category is not None:
                 update_fields.append("parsed_category = ?")
@@ -380,6 +396,7 @@ class DatabaseManager:
                 FROM posts 
                 WHERE (parsed_store IS NULL OR parsed_store = '') 
                   AND parsed_address IS NULL
+                  AND deleted_at IS NULL
                 ORDER BY post_date DESC
             """
             
@@ -462,10 +479,18 @@ class DatabaseManager:
                 if latitude is not None:
                     update_fields.append("latitude = ?")
                     params.append(latitude)
+                elif parsed_address is not None:
+                    # 地址變了又沒附新座標：清掉舊座標讓 app 下次同步重新定位
+                    # （SET 右側讀到的是更新前的值，所以這裡比的是舊地址）
+                    update_fields.append("latitude = CASE WHEN parsed_address IS ? THEN latitude ELSE NULL END")
+                    params.append(parsed_address)
 
                 if longitude is not None:
                     update_fields.append("longitude = ?")
                     params.append(longitude)
+                elif parsed_address is not None:
+                    update_fields.append("longitude = CASE WHEN parsed_address IS ? THEN longitude ELSE NULL END")
+                    params.append(parsed_address)
 
                 if not update_fields:
                     results["failed_count"] += 1
@@ -535,6 +560,7 @@ class DatabaseManager:
                 SELECT post_id, parsed_store, parsed_address, parsed_category, visited_at, created_at, latitude, longitude
                 FROM posts
                 WHERE parsed_address IS NOT NULL AND parsed_address != ''
+                  AND deleted_at IS NULL
                 ORDER BY created_at DESC
             """
 
@@ -573,27 +599,74 @@ class DatabaseManager:
             return results
             
         except Exception as e:
+            # 不能吞掉錯誤回空清單：app 會把「後端沒有的貼文」從本機移除，
+            # 查詢失敗若被當成「一筆都沒有」，就會清空 app 的資料。
             self.logger.error(f"獲取已解析貼文失敗: {e}")
-            return []
+            raise
     
+    # 不從 _processed_ids_cache 移除：軟刪除的貼文仍算「已處理」，抓取時要跳過
+    _SOFT_DELETE_SQL = (
+        "UPDATE posts SET deleted_at = COALESCE(deleted_at, CURRENT_TIMESTAMP), "
+        "updated_at = CURRENT_TIMESTAMP WHERE post_id = ?"
+    )
+
+    def restore_post(self, post_id: str) -> bool:
+        """還原已軟刪除的貼文（deleted_at = NULL）"""
+        try:
+            conn = sqlite3.connect(self.database_file)
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE posts SET deleted_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE post_id = ?",
+                (post_id,)
+            )
+            rows_affected = cursor.rowcount
+            conn.commit()
+            conn.close()
+            if rows_affected > 0:
+                self.logger.info(f"已還原貼文 {post_id}")
+                return True
+            self.logger.warning(f"找不到貼文 ID: {post_id}")
+            return False
+        except Exception as e:
+            self.logger.error(f"還原貼文失敗: {e}")
+            return False
+
+    def get_manage_posts(self) -> List[dict]:
+        """管理網頁用：回傳所有貼文的完整欄位，包含沒有地址的與已軟刪除的"""
+        try:
+            conn = sqlite3.connect(self.database_file)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT post_id, author, post_date, url, content,
+                       parsed_store, parsed_address, parsed_category,
+                       visited_at, latitude, longitude, created_at, updated_at, deleted_at
+                FROM posts
+                ORDER BY created_at DESC, id DESC
+            ''')
+            rows = [dict(row) for row in cursor.fetchall()]
+            conn.close()
+            return rows
+        except Exception as e:
+            self.logger.error(f"獲取管理清單失敗: {e}")
+            raise
+
     def delete_post_by_id(self, post_id: str) -> bool:
-        """根據 post_id 刪除貼文"""
+        """根據 post_id 軟刪除貼文（寫入 deleted_at，資料列保留）
+
+        已經刪除過的貼文再刪一次也算成功，且保留原本的刪除時間。
+        """
         try:
             conn = sqlite3.connect(self.database_file)
             cursor = conn.cursor()
             
-            # 刪除貼文
-            cursor.execute('DELETE FROM posts WHERE post_id = ?', (post_id,))
+            cursor.execute(self._SOFT_DELETE_SQL, (post_id,))
             rows_affected = cursor.rowcount
             
             conn.commit()
             conn.close()
             
             if rows_affected > 0:
-                # 從快取中移除
-                if self._processed_ids_cache is not None:
-                    self._processed_ids_cache.discard(post_id)
-                
                 self.logger.info(f"成功刪除貼文 {post_id}")
                 return True
             else:
@@ -634,16 +707,12 @@ class DatabaseManager:
                     continue
                 
                 try:
-                    cursor.execute('DELETE FROM posts WHERE post_id = ?', (post_id,))
+                    cursor.execute(self._SOFT_DELETE_SQL, (post_id,))
                     rows_affected = cursor.rowcount
                     
                     if rows_affected > 0:
                         results["success_count"] += 1
                         results["success_posts"].append(post_id)
-                        
-                        # 從快取中移除
-                        if self._processed_ids_cache is not None:
-                            self._processed_ids_cache.discard(post_id)
                         
                         self.logger.info(f"成功刪除貼文 {post_id}")
                     else:
