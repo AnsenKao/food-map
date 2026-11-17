@@ -4,10 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>美食地圖管理</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="anonymous">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous"></script>
 <style>
   :root {
     --bg: #f6f5f2; --panel: #ffffff; --line: #e4e1da; --text: #1f1d1a; --muted: #77726a;
     --accent: #d9622b; --accent-soft: #fbe9df; --danger: #c0392b; --ok: #2e7d4f; --warn: #b7791f;
+    --pin-red: #e0393e; --pin-blue: #2f6fe0; --pin-badge: #f59e0b;
     --radius: 10px;
   }
   @media (prefers-color-scheme: dark) {
@@ -17,16 +22,20 @@
     }
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; }
   body {
     margin: 0; background: var(--bg); color: var(--text);
     font: 15px/1.5 -apple-system, BlinkMacSystemFont, "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+    /* 整頁固定高度：列表與地圖各自捲動 */
+    height: 100dvh; display: flex; flex-direction: column; overflow: hidden;
   }
   button, input, select, textarea { font: inherit; color: inherit; }
   header {
-    position: sticky; top: 0; z-index: 5; background: var(--bg);
+    flex: none; z-index: 5; background: var(--bg);
     border-bottom: 1px solid var(--line); padding: 14px 16px 10px;
   }
-  .wrap { max-width: 1100px; margin: 0 auto; }
+  .wrap { max-width: 1600px; margin: 0 auto; }
   .top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   h1 { font-size: 19px; margin: 0; margin-right: auto; }
   .controls { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
@@ -46,7 +55,31 @@
   .tabs button { border-radius: 999px; padding: 4px 12px; font-size: 14px; }
   .tabs button[aria-pressed=true] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
   .tabs .n { color: var(--muted); margin-left: 4px; font-variant-numeric: tabular-nums; }
-  main { padding: 12px 16px 80px; }
+
+  /* 列表／地圖切換（只在窄螢幕出現） */
+  .viewtabs { display: none; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .viewtabs button { border: 0; border-radius: 0; padding: 6px 14px; }
+  .viewtabs button + button { border-left: 1px solid var(--line); }
+  .viewtabs button[aria-pressed=true] { background: var(--accent); color: #fff; }
+
+  main {
+    flex: 1; min-height: 0; display: grid;
+    grid-template-columns: minmax(380px, 5fr) 7fr;
+  }
+  .pane-list {
+    overflow: auto; padding: 12px 16px 80px; border-right: 1px solid var(--line);
+    container-type: inline-size;
+  }
+  .pane-map { position: relative; min-height: 0; min-width: 0; isolation: isolate; }
+  #map { position: absolute; inset: 0; background: var(--bg); }
+  @media (max-width: 899px) {
+    main { grid-template-columns: minmax(0, 1fr); }
+    .viewtabs { display: flex; }
+    .pane-list { border-right: 0; }
+    body[data-view=list] .pane-map { display: none; }
+    body[data-view=map] .pane-list { display: none; }
+  }
+
   .hint { color: var(--muted); font-size: 13px; margin: 0 0 10px; }
   .list { display: grid; gap: 8px; }
   .row {
@@ -55,6 +88,9 @@
     grid-template-columns: minmax(0, 1fr) auto;
   }
   .row.deleted { opacity: .7; }
+  .row.hl { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .row .info.clickable { cursor: pointer; }
+  .row .info.clickable:hover .name { color: var(--accent); }
   .name { font-weight: 600; overflow-wrap: anywhere; }
   .name.empty, .addr.empty { color: var(--muted); font-weight: 400; font-style: italic; }
   .addr { color: var(--muted); font-size: 14px; overflow-wrap: anywhere; }
@@ -68,11 +104,64 @@
   .actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
   .actions button { font-size: 13.5px; padding: 5px 10px; white-space: nowrap; }
   .actions button.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
-  @media (max-width: 620px) {
+  @container (max-width: 640px) {
     .row { grid-template-columns: minmax(0, 1fr); }
     .actions { justify-content: flex-start; margin-top: 4px; }
   }
   .empty-state { text-align: center; color: var(--muted); padding: 48px 0; }
+
+  /* ---- 地圖 ---- */
+  .pin { background: none; border: 0; }
+  .pin-dot {
+    position: relative; width: 24px; height: 24px; border-radius: 50%;
+    background: var(--pin-red); border: 2px solid #fff; box-shadow: 0 2px 5px rgba(0,0,0,.35);
+    transition: transform .12s;
+  }
+  .pin-dot::after {
+    content: ""; position: absolute; left: 50%; top: 50%; width: 7px; height: 7px; margin: -3.5px 0 0 -3.5px;
+    border-radius: 50%; background: #fff;
+  }
+  .pin-dot.visited { background: var(--pin-blue); }
+  .pin-dot.selected { transform: scale(1.3); box-shadow: 0 0 0 3px var(--accent), 0 2px 6px rgba(0,0,0,.4); }
+  .pin-dot.adjusting { background: var(--accent); transform: scale(1.3); box-shadow: 0 0 0 4px rgba(217,98,43,.35), 0 2px 6px rgba(0,0,0,.4); cursor: grab; }
+  .pin-count {
+    position: absolute; top: -7px; right: -9px; min-width: 16px; height: 16px; padding: 0 4px;
+    border-radius: 999px; background: var(--pin-badge); color: #fff; border: 1.5px solid #fff;
+    font: 700 10px/13px -apple-system, BlinkMacSystemFont, sans-serif; text-align: center;
+  }
+  .map-overlay { position: absolute; z-index: 1000; }
+  .map-badge {
+    top: 10px; right: 10px; font-size: 13px; padding: 4px 10px; border-radius: 999px;
+    color: var(--warn); border-color: currentColor; box-shadow: 0 2px 8px rgba(0,0,0,.15);
+  }
+  .adjust-bar {
+    top: 10px; left: 56px; right: 10px; margin: 0 auto; max-width: 520px;
+    background: var(--panel); border: 1px solid var(--accent); border-radius: 12px; padding: 10px 12px;
+    display: grid; gap: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.2); font-size: 14px;
+  }
+  .adjust-bar .sub { color: var(--muted); font-size: 12.5px; }
+  .adjust-bar .dialog-actions button { padding: 5px 12px; }
+  .card {
+    left: 10px; bottom: 24px; width: min(380px, calc(100% - 20px));
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px;
+    box-shadow: 0 6px 24px rgba(0,0,0,.22); display: grid; gap: 6px;
+  }
+  .card-head { display: flex; align-items: center; gap: 6px; }
+  .card-head .pager { margin-right: auto; display: flex; align-items: center; gap: 4px; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+  .card-head button { padding: 1px 9px; }
+  .card .links { display: flex; gap: 12px; flex-wrap: wrap; font-size: 13.5px; }
+  .card .links a { color: var(--accent); text-decoration: none; }
+  .card .links a:hover { text-decoration: underline; }
+  .card .actions { justify-content: flex-start; margin-top: 2px; }
+  #map.placing, #map.placing .leaflet-interactive { cursor: crosshair; }
+  .map-error { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); padding: 24px; text-align: center; }
+  @media (prefers-color-scheme: dark) {
+    .leaflet-tile-pane { filter: brightness(.8) contrast(1.05); }
+    .leaflet-bar a, .leaflet-bar a:hover { background: var(--panel); color: var(--text); border-bottom-color: var(--line); }
+    .leaflet-container .leaflet-control-attribution { background: rgba(33,32,38,.8); color: var(--muted); }
+    .leaflet-container .leaflet-control-attribution a { color: var(--accent); }
+  }
+
   dialog {
     border: 1px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--text);
     padding: 0; width: min(560px, calc(100vw - 24px));
@@ -98,11 +187,15 @@
   #toast button { background: transparent; border: 1px solid currentColor; color: inherit; padding: 3px 10px; }
 </style>
 </head>
-<body>
+<body data-view="list">
 <header>
   <div class="wrap">
     <div class="top">
       <h1>美食地圖管理</h1>
+      <div class="viewtabs" id="viewTabs" role="group" aria-label="檢視">
+        <button type="button" data-view="list" aria-pressed="true">列表</button>
+        <button type="button" data-view="map" aria-pressed="false">地圖</button>
+      </div>
       <select id="user" aria-label="使用者"></select>
       <button id="reload" type="button">重新整理</button>
     </div>
@@ -120,10 +213,16 @@
 </header>
 
 <main>
-  <div class="wrap">
+  <section class="pane-list" id="paneList" aria-label="列表">
     <p class="hint">這裡的修改會直接寫進資料庫；手機 app 要等下次同步（開啟 app、手動刷新或每小時一次）才會看到。</p>
     <div class="list" id="list"></div>
-  </div>
+  </section>
+  <section class="pane-map" aria-label="地圖">
+    <div id="map"></div>
+    <button type="button" class="map-overlay map-badge" id="unlocated" hidden></button>
+    <div class="map-overlay adjust-bar" id="adjustBar" hidden></div>
+    <div class="map-overlay card" id="card" hidden></div>
+  </section>
 </main>
 
 <dialog id="editor">
@@ -146,7 +245,20 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
-const state = { user: '', posts: [], tab: 'all', q: '', cat: '', visited: '', editing: null };
+const state = {
+  user: '', posts: [], tab: 'all', q: '', cat: '', visited: '', editing: null,
+  view: 'list',   // 窄螢幕目前顯示的分頁：list / map
+  selId: null,    // 地圖上選取（資訊卡顯示）的貼文 post_id
+  adjust: null,   // 調整位置中：{ post, mode: 'drag' | 'place', latlng }
+};
+
+// 與 app 一致的設定（food-map-app-v2 的 AppConfig / MapConfig）
+const MAP_DEFAULT = [22.6273, 120.3014];   // 高雄市
+const GRID = 0.0002;                       // MapConfig.pinMergeGridSize
+const CAT_ORDER = ['日式料理', '拉麵', '麵食', '中式・熱炒', '台式小吃',
+  '港式・粵菜', '火鍋', '燒肉・居酒屋', '牛排・鐵板燒', '義式',
+  '漢堡・美式', '西式・餐酒館', '異國料理', '早餐・早午餐',
+  '咖啡・飲品', '甜點・冰品', '其他'];
 
 const TABS = [
   { id: 'all',     label: '全部',   test: (p) => !p.deleted_at },
@@ -156,7 +268,16 @@ const TABS = [
   { id: 'deleted', label: '已刪除', test: (p) => !!p.deleted_at },
 ];
 
-function hasCoord(p) { return p.latitude != null && p.longitude != null; }
+// 有效座標：同 app 的 FoodPlace.hasValidCoordinate（排除 (0,0) 與預設中心點）
+function hasCoord(p) {
+  if (p.latitude == null || p.longitude == null) return false;
+  const lat = Number(p.latitude), lng = Number(p.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+  if (lat === 0 && lng === 0) return false;
+  return !(Math.abs(lat - MAP_DEFAULT[0]) < 1e-6 && Math.abs(lng - MAP_DEFAULT[1]) < 1e-6);
+}
+
+const storeName = (p) => p.parsed_store || p.post_id;
 
 // ---- API ----
 async function api(method, path, body) {
@@ -223,8 +344,21 @@ function matches(p) {
   return true;
 }
 
+// 目前分頁 + 篩選下的貼文（列表與地圖共用）
+function visiblePosts() {
+  const tab = TABS.find((t) => t.id === state.tab);
+  return state.posts.filter((p) => tab.test(p) && matches(p));
+}
+
+function catRank(c) {
+  const i = CAT_ORDER.indexOf(c);
+  return i === -1 ? CAT_ORDER.length : i;
+}
+
 function renderFilters() {
-  const cats = [...new Set(state.posts.map((p) => p.parsed_category).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+  // 分類順序同 app 的 availableCategories，不在清單裡的排最後
+  const cats = [...new Set(state.posts.map((p) => p.parsed_category).filter(Boolean))]
+    .sort((a, b) => catRank(a) - catRank(b) || a.localeCompare(b, 'zh-Hant'));
   if (state.cat && !cats.includes(state.cat)) state.cat = '';
   $('cat').replaceChildren(new Option('分類：全部', ''), ...cats.map((c) => new Option(c, c)));
   $('cat').value = state.cat;
@@ -239,16 +373,21 @@ function renderFilters() {
 
 function renderRow(p) {
   const deleted = !!p.deleted_at;
+  const located = !deleted && hasCoord(p);
   const meta = el('div', { class: 'meta' },
     p.parsed_category ? el('span', { class: 'chip cat' }, p.parsed_category) : null,
     p.visited_at ? el('span', { class: 'chip ok' }, `已到訪 ${fmtDate(p.visited_at)}`) : null,
-    !deleted && p.parsed_address && !hasCoord(p) ? el('span', { class: 'chip warn', title: 'app 下次同步時會重新定位' }, '未定位') : null,
+    !deleted && p.parsed_address && !hasCoord(p) ? el('span', { class: 'chip warn', title: 'app 下次同步時會重新定位，也可以手動放到地圖上' }, '未定位') : null,
     deleted ? el('span', { class: 'chip warn' }, `已刪除 ${fmtDate(p.deleted_at)}`) : null,
     el('span', {}, `@${p.author}`),
     el('span', {}, `加入 ${fmtDate(p.created_at)}`),
     el('a', { href: p.url, target: '_blank', rel: 'noopener noreferrer' }, 'IG 貼文'),
   );
-  const info = el('div', {},
+  const info = el('div', {
+      class: 'info' + (located ? ' clickable' : ''),
+      title: located ? '在地圖上顯示' : null,
+      onclick: located ? (e) => { if (!e.target.closest('a')) focusPost(p); } : null,
+    },
     el('div', { class: 'name' + (p.parsed_store ? '' : ' empty') }, p.parsed_store || '（沒有店名）'),
     el('div', { class: 'addr' + (p.parsed_address ? '' : ' empty') }, p.parsed_address || '（沒有地址，不會出現在 app 地圖上）'),
     meta,
@@ -256,21 +395,284 @@ function renderRow(p) {
   const actions = deleted
     ? el('div', { class: 'actions' }, el('button', { type: 'button', onclick: () => restore(p) }, '還原'))
     : el('div', { class: 'actions' },
+        located ? el('button', { type: 'button', onclick: () => focusPost(p) }, '地圖') : null,
+        p.parsed_address && !hasCoord(p) ? el('button', { type: 'button', onclick: () => startAdjust(p, 'place') }, '放到地圖上') : null,
         el('button', { type: 'button', class: p.visited_at ? 'on' : '', 'aria-pressed': String(!!p.visited_at), onclick: () => toggleVisited(p) },
           p.visited_at ? '取消到訪' : '標記到訪'),
         el('button', { type: 'button', onclick: () => openEditor(p) }, '編輯'),
         el('button', { type: 'button', class: 'danger', onclick: () => remove(p) }, '刪除'),
       );
-  return el('div', { class: 'row' + (deleted ? ' deleted' : '') }, info, actions);
+  return el('div', { class: 'row' + (deleted ? ' deleted' : '') + (p.post_id === state.selId ? ' hl' : ''), 'data-id': p.post_id }, info, actions);
 }
 
 function render() {
   renderFilters();
-  const tab = TABS.find((t) => t.id === state.tab);
-  const rows = state.posts.filter((p) => tab.test(p) && matches(p));
+  const rows = visiblePosts();
   $('list').replaceChildren(...(rows.length
     ? rows.map(renderRow)
     : [el('div', { class: 'empty-state' }, state.posts.length ? '沒有符合條件的貼文' : '這個使用者還沒有任何貼文')]));
+  renderMap();
+}
+
+// ---- 版面（窄螢幕的列表／地圖分頁）----
+const narrowQuery = window.matchMedia('(max-width: 899px)');
+const isNarrow = () => narrowQuery.matches;
+
+function setView(view) {
+  state.view = view;
+  document.body.dataset.view = view;
+  for (const b of $('viewTabs').querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.view === view));
+  if (view === 'map') mapShown();
+  else scrollRowIntoView();
+}
+
+// 地圖容器從隱藏變成可見時，Leaflet 要重新量尺寸，否則圖磚會破版
+function mapShown() {
+  if (!mapUI.map) return;
+  mapUI.map.invalidateSize();
+  if (mapUI.needFit) fitToPins();
+}
+
+// ---- 地圖 ----
+const mapUI = { map: null, layer: null, groups: [], fitKey: null, needFit: false, fitTimer: null, adjustMarker: null };
+
+function initMap() {
+  if (!window.L) {
+    $('map').append(el('div', { class: 'map-error' }, '地圖元件載入失敗（可能是網路連不到 unpkg.com），列表功能不受影響。'));
+    return;
+  }
+  const map = L.map('map', { zoomControl: true }).setView(MAP_DEFAULT, 13);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  }).addTo(map);
+  mapUI.layer = L.layerGroup().addTo(map);
+  map.on('click', onMapClick);
+  mapUI.map = map;
+}
+
+// 同 app 的 MapViewModel.groupByGrid：同一格併成一根圖釘，位置取第一筆，順序維持輸入順序
+function groupByGrid(posts) {
+  const buckets = new Map();
+  for (const p of posts) {
+    const lat = Number(p.latitude), lng = Number(p.longitude);
+    const key = `${Math.floor(lat / GRID)}_${Math.floor(lng / GRID)}`;
+    if (!buckets.has(key)) buckets.set(key, { key, lat, lng, posts: [] });
+    buckets.get(key).posts.push(p);
+  }
+  return [...buckets.values()];
+}
+
+function pinIcon(group, selected) {
+  const allVisited = group.posts.every((p) => p.visited_at);
+  const dot = el('div', { class: 'pin-dot' + (allVisited ? ' visited' : '') + (selected ? ' selected' : '') },
+    group.posts.length > 1 ? el('span', { class: 'pin-count' }, String(group.posts.length)) : null);
+  return L.divIcon({ className: 'pin', html: dot, iconSize: [24, 24], iconAnchor: [12, 12] });
+}
+
+function selectedGroup() {
+  if (!state.selId) return null;
+  return mapUI.groups.find((g) => g.posts.some((p) => p.post_id === state.selId)) || null;
+}
+
+function renderMap() {
+  // 角落：目前篩選下有地址但沒座標的數量
+  const unlocated = state.posts.filter((p) => !p.deleted_at && p.parsed_address && !hasCoord(p) && matches(p)).length;
+  $('unlocated').hidden = unlocated === 0 || !!state.adjust;   // 調整位置時讓出右上角給操作列
+  $('unlocated').textContent = `未定位 ${unlocated} 筆（不在地圖上）`;
+
+  if (!mapUI.map) return;
+  const adjustingId = state.adjust && state.adjust.post.post_id;
+  const pinned = visiblePosts().filter((p) => !p.deleted_at && hasCoord(p) && p.post_id !== adjustingId);
+  mapUI.groups = groupByGrid(pinned);
+  if (state.selId && !selectedGroup()) state.selId = null;
+
+  mapUI.layer.clearLayers();
+  for (const g of mapUI.groups) {
+    const selected = g.posts.some((p) => p.post_id === state.selId);
+    const marker = L.marker([g.lat, g.lng], {
+      icon: pinIcon(g, selected),
+      title: g.posts.map(storeName).join('、'),
+      zIndexOffset: selected ? 1000 : 0,
+      riseOnHover: true,
+    });
+    marker.on('click', () => onPinClick(g));
+    mapUI.layer.addLayer(marker);
+  }
+
+  renderCard();
+  renderAdjustBar();
+
+  // 篩選條件變了才重新縮放到全部圖釘（打字時延後一點，避免一直跳）
+  const key = [state.user, state.tab, state.q, state.cat, state.visited].join('\u0001');
+  if (key !== mapUI.fitKey) {
+    mapUI.fitKey = key;
+    clearTimeout(mapUI.fitTimer);
+    mapUI.fitTimer = setTimeout(() => { mapUI.needFit = true; fitToPins(); }, state.q ? 400 : 0);
+  }
+}
+
+function fitToPins() {
+  const map = mapUI.map;
+  if (!map || !map.getContainer().offsetWidth) return;   // 地圖隱藏中，等切到地圖時再縮放
+  mapUI.needFit = false;
+  if (!mapUI.groups.length) return;
+  const bounds = L.latLngBounds(mapUI.groups.map((g) => [g.lat, g.lng]));
+  map.fitBounds(bounds, { padding: [40, 40], maxZoom: 16 });
+}
+
+function onPinClick(group) {
+  if (state.adjust) return;
+  // 已選取同一組就保留目前那筆，否則選這組的第一筆
+  if (!group.posts.some((p) => p.post_id === state.selId)) state.selId = group.posts[0].post_id;
+  render();
+  scrollRowIntoView();
+}
+
+function onMapClick(e) {
+  if (state.adjust) {
+    placeAdjustMarker(e.latlng);
+    renderAdjustBar();
+  } else if (state.selId) {
+    state.selId = null;
+    render();
+  }
+}
+
+// 從列表跳到地圖：選取並飛過去
+function focusPost(p) {
+  if (!mapUI.map || !hasCoord(p)) return;
+  if (state.adjust) cancelAdjust();
+  state.selId = p.post_id;
+  if (isNarrow()) setView('map');
+  render();
+  mapUI.needFit = false;
+  clearTimeout(mapUI.fitTimer);
+  mapUI.map.flyTo([Number(p.latitude), Number(p.longitude)], Math.max(mapUI.map.getZoom(), 17), { duration: 0.6 });
+}
+
+function scrollRowIntoView() {
+  if (!state.selId) return;
+  const row = $('list').querySelector(`.row[data-id="${CSS.escape(state.selId)}"]`);
+  if (row && row.offsetParent) row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
+
+function googleMapsUrl(p) {
+  const query = [p.parsed_store, p.parsed_address].filter(Boolean).join(' ');
+  return 'https://www.google.com/maps/search/' + encodeURIComponent(query);
+}
+
+function renderCard() {
+  const card = $('card');
+  const g = state.adjust ? null : selectedGroup();
+  if (!g) { card.hidden = true; card.replaceChildren(); return; }
+  const idx = g.posts.findIndex((p) => p.post_id === state.selId);
+  const p = g.posts[idx];
+  const n = g.posts.length;
+  const go = (delta) => { state.selId = g.posts[(idx + delta + n) % n].post_id; render(); scrollRowIntoView(); };
+
+  card.replaceChildren(
+    el('div', { class: 'card-head' },
+      n > 1
+        ? el('div', { class: 'pager' },
+            el('button', { type: 'button', 'aria-label': '上一間', onclick: () => go(-1) }, '‹'),
+            el('span', {}, `${idx + 1} / ${n}`),
+            el('button', { type: 'button', 'aria-label': '下一間', onclick: () => go(1) }, '›'))
+        : el('div', { class: 'pager' }),
+      el('button', { type: 'button', 'aria-label': '關閉', onclick: () => { state.selId = null; render(); } }, '×'),
+    ),
+    el('div', { class: 'name' + (p.parsed_store ? '' : ' empty') }, p.parsed_store || '（沒有店名）'),
+    el('div', { class: 'addr' }, p.parsed_address || ''),
+    el('div', { class: 'meta' },
+      p.parsed_category ? el('span', { class: 'chip cat' }, p.parsed_category) : null,
+      p.visited_at ? el('span', { class: 'chip ok' }, `已到訪 ${fmtDate(p.visited_at)}`) : el('span', { class: 'chip' }, '未到訪'),
+    ),
+    el('div', { class: 'links' },
+      el('a', { href: googleMapsUrl(p), target: '_blank', rel: 'noopener noreferrer' }, '在 Google 地圖搜尋'),
+      p.url ? el('a', { href: p.url, target: '_blank', rel: 'noopener noreferrer' }, '開啟 IG 原貼文') : null,
+    ),
+    el('div', { class: 'actions' },
+      el('button', { type: 'button', class: p.visited_at ? 'on' : '', 'aria-pressed': String(!!p.visited_at), onclick: () => toggleVisited(p) },
+        p.visited_at ? '取消到訪' : '標記到訪'),
+      el('button', { type: 'button', onclick: () => openEditor(p) }, '編輯'),
+      el('button', { type: 'button', onclick: () => startAdjust(p, 'drag') }, '調整位置'),
+      el('button', { type: 'button', class: 'danger', onclick: () => remove(p) }, '刪除'),
+    ),
+  );
+  card.hidden = false;
+}
+
+// ---- 調整位置／放到地圖上 ----
+function startAdjust(p, mode) {
+  if (!mapUI.map) { toast('地圖無法使用', { error: true }); return; }
+  cancelAdjust(false);
+  state.adjust = { post: p, mode, latlng: null };
+  if (isNarrow()) setView('map');
+  if (mode === 'drag' && hasCoord(p)) {
+    const ll = L.latLng(Number(p.latitude), Number(p.longitude));
+    placeAdjustMarker(ll);
+    mapUI.map.panTo(ll);
+  }
+  $('map').classList.add('placing');
+  render();
+}
+
+function placeAdjustMarker(latlng) {
+  state.adjust.latlng = latlng;
+  if (mapUI.adjustMarker) { mapUI.adjustMarker.setLatLng(latlng); return; }
+  const icon = L.divIcon({ className: 'pin', html: el('div', { class: 'pin-dot adjusting' }), iconSize: [24, 24], iconAnchor: [12, 12] });
+  const marker = L.marker(latlng, { icon, draggable: true, zIndexOffset: 2000, autoPan: true });
+  marker.on('dragend', () => { if (state.adjust) { state.adjust.latlng = marker.getLatLng(); renderAdjustBar(); } });
+  marker.addTo(mapUI.map);
+  mapUI.adjustMarker = marker;
+}
+
+function cancelAdjust(rerender = true) {
+  if (!state.adjust) return;
+  state.adjust = null;
+  if (mapUI.adjustMarker) { mapUI.adjustMarker.remove(); mapUI.adjustMarker = null; }
+  $('map').classList.remove('placing');
+  if (rerender) render();
+}
+
+function renderAdjustBar() {
+  const bar = $('adjustBar');
+  const a = state.adjust;
+  if (!a) { bar.hidden = true; bar.replaceChildren(); return; }
+  const name = storeName(a.post);
+  const title = a.mode === 'drag'
+    ? `拖曳圖釘調整「${name}」的位置`
+    : (a.latlng ? `已放置「${name}」，可再拖曳微調` : `點地圖放置「${name}」`);
+  const sub = a.latlng
+    ? `${a.latlng.lat.toFixed(6)}, ${a.latlng.lng.toFixed(6)}　也可以直接點地圖移動圖釘`
+    : (a.post.parsed_address || '');
+  const confirmBtn = el('button', { type: 'button', class: 'primary', onclick: () => confirmAdjust(confirmBtn) }, '確認');
+  confirmBtn.disabled = !a.latlng;
+  bar.replaceChildren(
+    el('div', {}, title),
+    el('div', { class: 'sub' }, sub),
+    el('div', { class: 'dialog-actions' },
+      el('button', { type: 'button', onclick: () => cancelAdjust() }, '取消'),
+      confirmBtn),
+  );
+  bar.hidden = false;
+}
+
+async function confirmAdjust(btn) {
+  const a = state.adjust;
+  if (!a || !a.latlng) return;
+  const ll = a.latlng.wrap();
+  const update = { post_id: a.post.post_id, latitude: Number(ll.lat.toFixed(6)), longitude: Number(ll.lng.toFixed(6)) };
+  btn.disabled = true;
+  const ok = await run(() => api('PATCH', userPath('/posts/update-metadata'), { updates: [update] }), `已更新「${storeName(a.post)}」的位置`);
+  if (!ok) { btn.disabled = false; return; }
+  cancelAdjust(false);
+  // 剛放好的店已不屬於「未定位」分頁，切回全部，才看得到它的圖釘
+  if (state.tab === 'nocoord') state.tab = 'all';
+  const updated = state.posts.find((p) => p.post_id === a.post.post_id);
+  if (updated && hasCoord(updated)) focusPost(updated);
+  else render();
+  scrollRowIntoView();
 }
 
 // ---- 提示 ----
@@ -307,14 +709,14 @@ function toggleVisited(p) {
 }
 
 function restore(p) {
-  return run(() => api('POST', userPath('/posts/restore'), { post_id: p.post_id }), `已還原「${p.parsed_store || p.post_id}」`);
+  return run(() => api('POST', userPath('/posts/restore'), { post_id: p.post_id }), `已還原「${storeName(p)}」`);
 }
 
 function remove(p) {
   // 軟刪除可以還原，所以不跳確認視窗，改給「復原」
   return run(
     () => api('DELETE', userPath('/posts'), { post_id: p.post_id, unsave_from_instagram: false }),
-    `已刪除「${p.parsed_store || p.post_id}」`,
+    `已刪除「${storeName(p)}」`,
     { actionLabel: '復原', onAction: () => restore(p) },
   );
 }
@@ -336,7 +738,7 @@ function updateEditNote() {
   const changed = addr !== (p.parsed_address || '');
   $('fNote').textContent = !changed ? ''
     : addr === '' ? '清空地址後，這筆會從 app 的地圖與列表消失。'
-    : '地址改了，舊座標會清除，app 下次同步時重新定位。';
+    : '地址改了，舊座標會清除（包含手動放置的位置），app 下次同步時重新定位；也可以之後在列表按「放到地圖上」手動放置。';
 }
 
 async function saveEdit(event) {
@@ -367,13 +769,29 @@ $('user').addEventListener('change', (e) => {
   state.user = e.target.value;
   localStorage.setItem('foodmap.user', state.user);
   state.cat = '';
+  state.selId = null;
+  cancelAdjust(false);
   run(async () => {});
 });
 $('reload').addEventListener('click', () => run(async () => {}, '已重新整理'));
 $('fAddress').addEventListener('input', updateEditNote);
 $('cancelEdit').addEventListener('click', () => $('editor').close());
 $('editForm').addEventListener('submit', saveEdit);
+$('viewTabs').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-view]');
+  if (b) setView(b.dataset.view);
+});
+$('unlocated').addEventListener('click', () => {
+  state.tab = 'nocoord';
+  if (isNarrow()) setView('list');
+  render();
+});
+narrowQuery.addEventListener('change', () => { if (!isNarrow() || state.view === 'map') mapShown(); });
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && state.adjust && !$('editor').open) cancelAdjust();
+});
 
+initMap();
 (async () => {
   try {
     await loadUsers();
