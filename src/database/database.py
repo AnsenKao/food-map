@@ -561,7 +561,7 @@ class DatabaseManager:
                 FROM posts
                 WHERE parsed_address IS NOT NULL AND parsed_address != ''
                   AND deleted_at IS NULL
-                ORDER BY created_at DESC
+                ORDER BY created_at DESC, id DESC
             """
 
             if limit is not None:
@@ -631,8 +631,11 @@ class DatabaseManager:
             self.logger.error(f"還原貼文失敗: {e}")
             return False
 
-    def get_manage_posts(self) -> List[dict]:
-        """管理網頁用：回傳所有貼文的完整欄位，包含沒有地址的與已軟刪除的"""
+    def get_manage_posts(self, post_id: Optional[str] = None) -> List[dict]:
+        """管理網頁用：回傳所有貼文的完整欄位，包含沒有地址的與已軟刪除的。
+
+        帶 post_id 時只回那一筆（找不到就是空清單）。
+        """
         try:
             conn = sqlite3.connect(self.database_file)
             conn.row_factory = sqlite3.Row
@@ -642,8 +645,9 @@ class DatabaseManager:
                        parsed_store, parsed_address, parsed_category,
                        visited_at, latitude, longitude, created_at, updated_at, deleted_at
                 FROM posts
+                WHERE ? IS NULL OR post_id = ?
                 ORDER BY created_at DESC, id DESC
-            ''')
+            ''', (post_id, post_id))
             rows = [dict(row) for row in cursor.fetchall()]
             conn.close()
             return rows

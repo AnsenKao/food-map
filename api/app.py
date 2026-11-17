@@ -4,12 +4,14 @@ FastAPI 應用程式 - Instagram 貼文提取器 API
 """
 import sys
 import os
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Request
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse
 from pydantic import BaseModel
 from typing import Optional, List
 import glob
 import logging
+import re
 from contextlib import asynccontextmanager
 import instaloader
 
@@ -85,17 +87,46 @@ async def lifespan(app: FastAPI):
     extractor_instances.clear()
     logger.info("FastAPI 應用程式關閉")
 
+# Instagram 使用者名稱的合法格式；也避免名稱被拿去組出奇怪的資料庫路徑
+USERNAME_RE = re.compile(r"^[A-Za-z0-9._]{1,30}$")
+
+def user_database_exists(username: str) -> bool:
+    """這個使用者是否已經有資料庫（也就是登入過）"""
+    return bool(USERNAME_RE.match(username)) and os.path.exists(Config.get_database_path(username))
+
+async def require_known_user(request: Request):
+    """網址裡的 {username} 必須是登入過的使用者。
+
+    資料庫只在 /login 建立；其他端點遇到不存在的使用者一律 404，
+    否則打錯名字就會憑空建出一個空資料庫。
+    """
+    username = request.path_params.get("username")
+    if username is None or user_database_exists(username):
+        return
+    # app 啟動時用 /session 判斷要不要登入，沒登入過的使用者要回 success: false 而不是 404
+    if request.url.path.startswith("/session/"):
+        return
+    raise HTTPException(status_code=404, detail=f"找不到使用者 {username}，請先登入")
+
 # 建立 FastAPI 應用程式
 app = FastAPI(
     title="Instagram 貼文提取器 API",
     description="用於提取和管理 Instagram 儲存貼文的 RESTful API",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    dependencies=[Depends(require_known_user)]
 )
 
+# 回應壓縮：管理網頁的清單帶完整貼文內文，壓縮後小很多
+app.add_middleware(GZipMiddleware, minimum_size=1024)
+
 # 依賴函數
-def get_extractor(username: str) -> InstagramExtractor:
-    """獲取或建立提取器實例"""
+def get_extractor(username: str, create: bool = False) -> InstagramExtractor:
+    """獲取提取器實例；只有 create=True（登入流程）才會替新使用者建立資料庫"""
+    if not create and not user_database_exists(username):
+        # 資料庫檔被移除後，記憶體裡的舊實例也要丟掉，否則下一次查詢又會把空檔建回來
+        extractor_instances.pop(username, None)
+        raise HTTPException(status_code=404, detail=f"找不到使用者 {username}，請先登入")
     if username not in extractor_instances:
         extractor = InstagramExtractor(
             username=username,
@@ -138,6 +169,8 @@ async def root():
 @app.get("/session/{username}")
 async def check_session(username: str):
     """檢查 server 端是否已有有效的 Instagram session（不需要密碼）"""
+    if not user_database_exists(username):
+        return {"success": False, "username": username}
     try:
         extractor = get_extractor(username)
         if extractor.auth_manager.is_logged_in:
@@ -190,9 +223,11 @@ async def verify_2fa(username: str, request: TwoFactorRequest):
 
 @app.post("/login")
 async def login(request: LoginRequest):
-    """登入 Instagram"""
+    """登入 Instagram（唯一會替新使用者建立資料庫的端點）"""
+    if not USERNAME_RE.match(request.username):
+        raise HTTPException(status_code=400, detail="使用者名稱格式不正確")
     try:
-        extractor = get_extractor(request.username)
+        extractor = get_extractor(request.username, create=True)
 
         # 初始化資料庫
         if not extractor.init_database():
@@ -567,14 +602,14 @@ async def restore_post(username: str, request: RestorePostRequest):
         raise HTTPException(status_code=500, detail=f"還原貼文時發生錯誤: {str(e)}")
 
 @app.get("/posts/manage/{username}")
-async def get_manage_posts(username: str):
-    """管理網頁用：回傳所有貼文的完整欄位，包含沒有地址的與已軟刪除的"""
-    # 不存在的使用者直接 404，避免管理網頁打錯名字就憑空建出一個空資料庫
-    if not os.path.exists(Config.get_database_path(username)):
-        raise HTTPException(status_code=404, detail=f"找不到使用者 {username} 的資料庫")
+async def get_manage_posts(username: str, post_id: Optional[str] = None):
+    """管理網頁用：回傳所有貼文的完整欄位，包含沒有地址的與已軟刪除的。
+
+    帶 post_id 時只回那一筆（網頁操作完用來更新單筆，不必整包重抓）。
+    """
     try:
         extractor = get_extractor(username)
-        posts = extractor.db_manager.get_manage_posts()
+        posts = extractor.db_manager.get_manage_posts(post_id)
         return {"success": True, "count": len(posts), "posts": posts}
     except Exception as e:
         logger.error(f"獲取管理清單時發生錯誤: {e}")

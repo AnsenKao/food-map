@@ -32,7 +32,7 @@
   }
   button, input, select, textarea { font: inherit; color: inherit; }
   header {
-    flex: none; z-index: 5; background: var(--bg);
+    flex: none; position: relative; z-index: 5; background: var(--bg);
     border-bottom: 1px solid var(--line); padding: 14px 16px 10px;
   }
   .wrap { max-width: 1600px; margin: 0 auto; }
@@ -51,6 +51,29 @@
   button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   button.danger { color: var(--danger); }
   button:disabled { opacity: .5; cursor: default; }
+  /* 分類多選下拉 */
+  .multi { position: relative; }
+  .multi summary {
+    list-style: none; cursor: pointer; white-space: nowrap; max-width: 260px; overflow: hidden; text-overflow: ellipsis;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px;
+  }
+  .multi summary::-webkit-details-marker { display: none; }
+  .multi summary::after { content: " ▾"; color: var(--muted); }
+  .multi.active summary { border-color: var(--accent); color: var(--accent); }
+  .multi .menu {
+    position: absolute; top: calc(100% + 4px); left: 0; z-index: 10; min-width: 220px;
+    max-height: 60vh; overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 6px; box-shadow: 0 8px 24px rgba(0,0,0,.2);
+  }
+  .menu-head { display: flex; justify-content: space-between; align-items: center; padding: 2px 8px 6px; font-size: 12.5px; color: var(--muted); }
+  .menu-head button { font-size: 12.5px; padding: 2px 8px; }
+  .multi label.opt {
+    display: flex; gap: 8px; align-items: center; padding: 5px 8px; border-radius: 6px;
+    font-size: 14px; color: var(--text); cursor: pointer;
+  }
+  .multi label.opt:hover { background: var(--accent-soft); }
+  .multi label.opt input { width: auto; margin: 0; accent-color: var(--accent); }
+  .multi label.opt .n { margin-left: auto; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
   .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
   .tabs button { border-radius: 999px; padding: 4px 12px; font-size: 14px; }
   .tabs button[aria-pressed=true] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
@@ -201,11 +224,22 @@
     </div>
     <div class="controls">
       <input id="q" type="search" placeholder="搜尋店名、地址、貼文內容、作者" aria-label="搜尋">
-      <select id="cat" aria-label="分類"></select>
+      <details class="multi" id="catMenu">
+        <summary id="catSummary">分類：全部</summary>
+        <div class="menu">
+          <div class="menu-head"><span>可複選</span><button type="button" id="catClear">清除</button></div>
+          <div id="catOpts"></div>
+        </div>
+      </details>
       <select id="visited" aria-label="到訪狀態">
         <option value="">到訪：全部</option>
         <option value="yes">已到訪</option>
         <option value="no">未到訪</option>
+      </select>
+      <select id="source" aria-label="來源">
+        <option value="">來源：全部</option>
+        <option value="ig">Instagram</option>
+        <option value="gmaps">Google 地圖</option>
       </select>
     </div>
     <div class="tabs" id="tabs"></div>
@@ -215,6 +249,7 @@
 <main>
   <section class="pane-list" id="paneList" aria-label="列表">
     <p class="hint">這裡的修改會直接寫進資料庫；手機 app 要等下次同步（開啟 app、手動刷新或每小時一次）才會看到。</p>
+    <p class="hint" id="tabHint" hidden>同一個地址有多筆貼文時，app 只會顯示最新加入的那筆，其餘的在 app 上看不到。多餘的可以在這裡刪掉；如果到訪章蓋在不顯示的那筆上，記得先替要留下的那筆標記到訪。</p>
     <div class="list" id="list"></div>
   </section>
   <section class="pane-map" aria-label="地圖">
@@ -232,7 +267,7 @@
     <label>地址<input id="fAddress" autocomplete="off"></label>
     <label>分類<input id="fCategory" list="catList" autocomplete="off"></label>
     <datalist id="catList"></datalist>
-    <label>原始貼文<div class="caption" id="fCaption"></div></label>
+    <label><span id="fCaptionLabel">原始貼文</span><div class="caption" id="fCaption"></div></label>
     <p class="note" id="fNote"></p>
     <div class="dialog-actions">
       <button type="button" id="cancelEdit">取消</button>
@@ -246,7 +281,7 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const state = {
-  user: '', posts: [], tab: 'all', q: '', cat: '', visited: '', editing: null,
+  user: '', posts: [], tab: 'all', q: '', cats: new Set(), visited: '', source: '', editing: null,   // cats 空集合 = 全部分類
   view: 'list',   // 窄螢幕目前顯示的分頁：list / map
   selId: null,    // 地圖上選取（資訊卡顯示）的貼文 post_id
   adjust: null,   // 調整位置中：{ post, mode: 'drag' | 'place', latlng }
@@ -265,6 +300,7 @@ const TABS = [
   { id: 'mapped',  label: '有地址', test: (p) => !p.deleted_at && !!p.parsed_address },
   { id: 'noaddr',  label: '缺地址', test: (p) => !p.deleted_at && !p.parsed_address },
   { id: 'nocoord', label: '未定位', test: (p) => !p.deleted_at && !!p.parsed_address && !hasCoord(p) },
+  { id: 'dup',     label: '重複地址', test: (p) => dupInfo(p) !== null },
   { id: 'deleted', label: '已刪除', test: (p) => !!p.deleted_at },
 ];
 
@@ -278,6 +314,30 @@ function hasCoord(p) {
 }
 
 const storeName = (p) => p.parsed_store || p.post_id;
+
+// 來源：從 Google 地圖清單匯入的貼文，post_id 以 gmaps- 開頭，url 是 Google 地圖連結；其餘是 IG 儲存的貼文
+const isGmaps = (p) => p.post_id.startsWith('gmaps-');
+const sourceLinkLabel = (p) => (isGmaps(p) ? 'Google 地圖' : 'IG 貼文');
+
+// 同地址的重複貼文。app 會依地址（字串完全相同）去重，只留清單裡最前面的那筆，
+// 也就是最新加入的；其餘的在 app 上看不到。這裡的順序與 /posts/parsed 一致。
+let dupGroups = new Map();   // 地址 → 未刪除且同地址的貼文（兩筆以上才會留在這裡）
+function computeDups() {
+  const byAddr = new Map();
+  for (const p of state.posts) {
+    if (p.deleted_at || !p.parsed_address) continue;
+    if (!byAddr.has(p.parsed_address)) byAddr.set(p.parsed_address, []);
+    byAddr.get(p.parsed_address).push(p);
+  }
+  dupGroups = new Map([...byAddr].filter(([, posts]) => posts.length > 1));
+}
+
+// 不是重複就回 null；否則回 { shown: app 是否顯示這筆, count: 同地址共幾筆 }
+function dupInfo(p) {
+  if (p.deleted_at || !p.parsed_address) return null;
+  const group = dupGroups.get(p.parsed_address);
+  return group ? { shown: group[0].post_id === p.post_id, count: group.length } : null;
+}
 
 // ---- API ----
 async function api(method, path, body) {
@@ -313,6 +373,17 @@ async function loadPosts() {
   render();
 }
 
+// 操作完只向後端重抓那一筆，換掉本機的資料（整包清單帶全部貼文內文，不值得每次重抓）
+async function refreshPost(postId) {
+  const data = await api('GET', `/posts/manage/${encodeURIComponent(state.user)}?post_id=${encodeURIComponent(postId)}`);
+  const i = state.posts.findIndex((p) => p.post_id === postId);
+  const fresh = data.posts[0];
+  if (fresh && i !== -1) state.posts[i] = fresh;
+  else if (!fresh && i !== -1) state.posts.splice(i, 1);
+  else if (fresh) state.posts.unshift(fresh);
+  render();
+}
+
 // ---- 畫面 ----
 function el(tag, props = {}, ...children) {
   const node = document.createElement(tag);
@@ -334,9 +405,15 @@ function fmtDate(value) {
 }
 
 function matches(p) {
-  if (state.cat && (p.parsed_category || '') !== state.cat) return false;
+  if (!matchesExceptCat(p)) return false;
+  return !state.cats.size || state.cats.has(p.parsed_category || '');
+}
+
+// 分類以外的條件（分類選單上的數量用這個算）
+function matchesExceptCat(p) {
   if (state.visited === 'yes' && !p.visited_at) return false;
   if (state.visited === 'no' && p.visited_at) return false;
+  if (state.source && (state.source === 'gmaps') !== isGmaps(p)) return false;
   if (state.q) {
     const hay = [p.parsed_store, p.parsed_address, p.parsed_category, p.content, p.author].join('\n').toLowerCase();
     if (!hay.includes(state.q.toLowerCase())) return false;
@@ -347,7 +424,10 @@ function matches(p) {
 // 目前分頁 + 篩選下的貼文（列表與地圖共用）
 function visiblePosts() {
   const tab = TABS.find((t) => t.id === state.tab);
-  return state.posts.filter((p) => tab.test(p) && matches(p));
+  const posts = state.posts.filter((p) => tab.test(p) && matches(p));
+  // 重複地址分頁把同地址的排在一起（sort 是穩定的，組內維持「最新在前」）
+  if (state.tab === 'dup') posts.sort((a, b) => a.parsed_address.localeCompare(b.parsed_address, 'zh-Hant'));
+  return posts;
 }
 
 function catRank(c) {
@@ -359,9 +439,24 @@ function renderFilters() {
   // 分類順序同 app 的 availableCategories，不在清單裡的排最後
   const cats = [...new Set(state.posts.map((p) => p.parsed_category).filter(Boolean))]
     .sort((a, b) => catRank(a) - catRank(b) || a.localeCompare(b, 'zh-Hant'));
-  if (state.cat && !cats.includes(state.cat)) state.cat = '';
-  $('cat').replaceChildren(new Option('分類：全部', ''), ...cats.map((c) => new Option(c, c)));
-  $('cat').value = state.cat;
+  for (const c of state.cats) if (!cats.includes(c)) state.cats.delete(c);
+  const picked = cats.filter((c) => state.cats.has(c));
+  $('catSummary').textContent = !picked.length ? '分類：全部'
+    : picked.length <= 2 ? `分類：${picked.join('、')}` : `分類：${picked.length} 類`;
+  $('catSummary').title = picked.join('、');
+  $('catMenu').classList.toggle('active', picked.length > 0);
+  $('catClear').disabled = !picked.length;
+  const base = state.posts.filter((p) => !p.deleted_at && matchesExceptCat(p));
+  $('catOpts').replaceChildren(...cats.map((c) => {
+    const box = el('input', { type: 'checkbox', value: c });
+    box.checked = state.cats.has(c);
+    box.addEventListener('change', () => {
+      if (box.checked) state.cats.add(c); else state.cats.delete(c);
+      render();
+    });
+    return el('label', { class: 'opt' }, box, el('span', {}, c),
+      el('span', { class: 'n' }, String(base.filter((p) => p.parsed_category === c).length)));
+  }));
   $('catList').replaceChildren(...cats.map((c) => new Option(c, c)));
 
   const filtered = state.posts.filter(matches);
@@ -374,14 +469,17 @@ function renderFilters() {
 function renderRow(p) {
   const deleted = !!p.deleted_at;
   const located = !deleted && hasCoord(p);
+  const dup = dupInfo(p);
   const meta = el('div', { class: 'meta' },
     p.parsed_category ? el('span', { class: 'chip cat' }, p.parsed_category) : null,
     p.visited_at ? el('span', { class: 'chip ok' }, `已到訪 ${fmtDate(p.visited_at)}`) : null,
+    dup && !dup.shown ? el('span', { class: 'chip warn', title: `同地址共有 ${dup.count} 筆，app 只顯示最新加入的那筆` }, 'app 不顯示（同地址重複）') : null,
+    dup && dup.shown && state.tab === 'dup' ? el('span', { class: 'chip', title: `同地址共有 ${dup.count} 筆` }, 'app 顯示這筆') : null,
     !deleted && p.parsed_address && !hasCoord(p) ? el('span', { class: 'chip warn', title: 'app 下次同步時會重新定位，也可以手動放到地圖上' }, '未定位') : null,
     deleted ? el('span', { class: 'chip warn' }, `已刪除 ${fmtDate(p.deleted_at)}`) : null,
-    el('span', {}, `@${p.author}`),
+    el('span', {}, isGmaps(p) ? p.author : `@${p.author}`),
     el('span', {}, `加入 ${fmtDate(p.created_at)}`),
-    el('a', { href: p.url, target: '_blank', rel: 'noopener noreferrer' }, 'IG 貼文'),
+    el('a', { href: p.url, target: '_blank', rel: 'noopener noreferrer' }, sourceLinkLabel(p)),
   );
   const info = el('div', {
       class: 'info' + (located ? ' clickable' : ''),
@@ -406,7 +504,9 @@ function renderRow(p) {
 }
 
 function render() {
+  computeDups();
   renderFilters();
+  $('tabHint').hidden = state.tab !== 'dup';
   const rows = visiblePosts();
   $('list').replaceChildren(...(rows.length
     ? rows.map(renderRow)
@@ -504,7 +604,7 @@ function renderMap() {
   renderAdjustBar();
 
   // 篩選條件變了才重新縮放到全部圖釘（打字時延後一點，避免一直跳）
-  const key = [state.user, state.tab, state.q, state.cat, state.visited].join('\u0001');
+  const key = [state.user, state.tab, state.q, [...state.cats].sort().join(','), state.visited, state.source].join('\u0001');
   if (key !== mapUI.fitKey) {
     mapUI.fitKey = key;
     clearTimeout(mapUI.fitTimer);
@@ -588,8 +688,9 @@ function renderCard() {
       p.visited_at ? el('span', { class: 'chip ok' }, `已到訪 ${fmtDate(p.visited_at)}`) : el('span', { class: 'chip' }, '未到訪'),
     ),
     el('div', { class: 'links' },
-      el('a', { href: googleMapsUrl(p), target: '_blank', rel: 'noopener noreferrer' }, '在 Google 地圖搜尋'),
-      p.url ? el('a', { href: p.url, target: '_blank', rel: 'noopener noreferrer' }, '開啟 IG 原貼文') : null,
+      // Google 來源的 url 本身就是那家店的地圖頁，不用再給搜尋連結
+      isGmaps(p) ? null : el('a', { href: googleMapsUrl(p), target: '_blank', rel: 'noopener noreferrer' }, '在 Google 地圖搜尋'),
+      p.url ? el('a', { href: p.url, target: '_blank', rel: 'noopener noreferrer' }, isGmaps(p) ? '開啟 Google 地圖' : '開啟 IG 原貼文') : null,
     ),
     el('div', { class: 'actions' },
       el('button', { type: 'button', class: p.visited_at ? 'on' : '', 'aria-pressed': String(!!p.visited_at), onclick: () => toggleVisited(p) },
@@ -664,7 +765,7 @@ async function confirmAdjust(btn) {
   const ll = a.latlng.wrap();
   const update = { post_id: a.post.post_id, latitude: Number(ll.lat.toFixed(6)), longitude: Number(ll.lng.toFixed(6)) };
   btn.disabled = true;
-  const ok = await run(() => api('PATCH', userPath('/posts/update-metadata'), { updates: [update] }), `已更新「${storeName(a.post)}」的位置`);
+  const ok = await run(() => api('PATCH', userPath('/posts/update-metadata'), { updates: [update] }), `已更新「${storeName(a.post)}」的位置`, undefined, a.post.post_id);
   if (!ok) { btn.disabled = false; return; }
   cancelAdjust(false);
   // 剛放好的店已不屬於「未定位」分頁，切回全部，才看得到它的圖釘
@@ -688,10 +789,11 @@ function toast(message, { error = false, actionLabel = null, onAction = null } =
   toastTimer = setTimeout(() => { $('toast').className = ''; }, actionLabel ? 8000 : 3500);
 }
 
-async function run(action, doneMessage, toastOptions) {
+// postId 有給就只更新那一筆，沒給（切換使用者、重新整理）才整包重抓
+async function run(action, doneMessage, toastOptions, postId) {
   try {
     await action();
-    await loadPosts();
+    if (postId) await refreshPost(postId); else await loadPosts();
     if (doneMessage) toast(doneMessage, toastOptions);
     return true;
   } catch (e) {
@@ -705,11 +807,11 @@ const userPath = (prefix) => `${prefix}/${encodeURIComponent(state.user)}`;
 
 function toggleVisited(p) {
   const method = p.visited_at ? 'DELETE' : 'POST';
-  return run(() => api(method, userPath('/posts/visit'), { post_id: p.post_id }), p.visited_at ? '已取消到訪' : '已標記到訪');
+  return run(() => api(method, userPath('/posts/visit'), { post_id: p.post_id }), p.visited_at ? '已取消到訪' : '已標記到訪', undefined, p.post_id);
 }
 
 function restore(p) {
-  return run(() => api('POST', userPath('/posts/restore'), { post_id: p.post_id }), `已還原「${storeName(p)}」`);
+  return run(() => api('POST', userPath('/posts/restore'), { post_id: p.post_id }), `已還原「${storeName(p)}」`, undefined, p.post_id);
 }
 
 function remove(p) {
@@ -718,6 +820,7 @@ function remove(p) {
     () => api('DELETE', userPath('/posts'), { post_id: p.post_id, unsave_from_instagram: false }),
     `已刪除「${storeName(p)}」`,
     { actionLabel: '復原', onAction: () => restore(p) },
+    p.post_id,
   );
 }
 
@@ -727,6 +830,7 @@ function openEditor(p) {
   $('fAddress').value = p.parsed_address || '';
   $('fCategory').value = p.parsed_category || '';
   $('fCaption').textContent = p.content || '（沒有內文）';
+  $('fCaptionLabel').textContent = isGmaps(p) ? '匯入來源' : '原始貼文';
   updateEditNote();
   $('editor').showModal();
 }
@@ -756,19 +860,24 @@ async function saveEdit(event) {
   }
   if (Object.keys(update).length === 1) { $('editor').close(); return; }
   $('saveEdit').disabled = true;
-  const ok = await run(() => api('PATCH', userPath('/posts/update-metadata'), { updates: [update] }), '已儲存');
+  const ok = await run(() => api('PATCH', userPath('/posts/update-metadata'), { updates: [update] }), '已儲存', undefined, p.post_id);
   $('saveEdit').disabled = false;
   if (ok) $('editor').close();
 }
 
 // ---- 事件 ----
 $('q').addEventListener('input', (e) => { state.q = e.target.value.trim(); render(); });
-$('cat').addEventListener('change', (e) => { state.cat = e.target.value; render(); });
+$('catClear').addEventListener('click', () => { state.cats.clear(); render(); });
+// 點選單外面就收起分類選單
+document.addEventListener('click', (e) => {
+  if ($('catMenu').open && !$('catMenu').contains(e.target)) $('catMenu').open = false;
+});
 $('visited').addEventListener('change', (e) => { state.visited = e.target.value; render(); });
+$('source').addEventListener('change', (e) => { state.source = e.target.value; render(); });
 $('user').addEventListener('change', (e) => {
   state.user = e.target.value;
   localStorage.setItem('foodmap.user', state.user);
-  state.cat = '';
+  state.cats.clear();
   state.selId = null;
   cancelAdjust(false);
   run(async () => {});
